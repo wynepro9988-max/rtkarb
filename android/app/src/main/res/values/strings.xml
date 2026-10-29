@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Rumah Bintang</string>
+    <string name="offline_title">Tidak dapat terhubung</string>
+    <string name="offline_body">Periksa koneksi internet Anda, lalu coba lagi.</string>
+    <string name="retry">Coba lagi</string>
+    <string name="no_app">Tidak ada aplikasi untuk membuka tautan ini</string>
+    <string name="download_started">Mengunduh %1$s</string>
+</resources>

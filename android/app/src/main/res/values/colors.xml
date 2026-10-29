@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Selaras dengan logo resmi: navy teks "RUMAH BINTANG". -->
+    <color name="primary">#2C378D</color>
+    <color name="background">#F6F5F1</color>
+    <color name="ink">#1F2430</color>
+    <color name="muted">#5A6070</color>
+    <color name="icon_background">#FFFFFF</color>
+</resources>

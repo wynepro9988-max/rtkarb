@@ -1,0 +1,54 @@
+{
+  "name": "rtka-rumah-bintang",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rumah Bintang — Pusat Kemandirian dan Tumbuh Kembang Anak: sistem manajemen multi-organisasi",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "db:init": "bash scripts/db-local.sh init",
+    "db:start": "bash scripts/db-local.sh start",
+    "db:stop": "bash scripts/db-local.sh stop",
+    "db:status": "bash scripts/db-local.sh status",
+    "db:migrate": "node --env-file-if-exists=.env server/scripts/migrate.ts",
+    "admin": "node --env-file-if-exists=.env server/scripts/admin.ts",
+    "seed:demo": "node --env-file-if-exists=.env server/scripts/seed-demo.ts",
+    "dev:server": "node --env-file-if-exists=.env --watch server/src/index.ts",
+    "dev:web": "vite --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts",
+    "start": "node --env-file-if-exists=.env server/src/index.ts",
+    "typecheck": "tsc -p server/tsconfig.json && tsc -p web/tsconfig.json",
+    "test": "vitest run",
+    "backup": "bash scripts/backup.sh",
+    "backup:verify": "bash scripts/verify-restore.sh",
+    "build:vercel": "npm run build && node scripts/build-vercel.mjs",
+    "storage:export": "node --env-file-if-exists=.env server/scripts/storage-export.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.5",
+    "@fastify/helmet": "13.2.0",
+    "@fastify/multipart": "10.1.6",
+    "@fastify/rate-limit": "11.2.1",
+    "@fastify/static": "10.1.8",
+    "@fontsource/plus-jakarta-sans": "5.3.0",
+    "fastify": "5.12.7",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-router": "7.18.5",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
+  }
+}
