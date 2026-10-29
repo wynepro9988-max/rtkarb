@@ -38,9 +38,16 @@ await build({
 });
 // Logo resmi untuk kop PDF (dibaca server/src/lib/pdf.ts di samping bundle).
 await cp(path.join(root, 'brand/logo-rumah-bintang.jpg'), path.join(fnDir, 'logo-rumah-bintang.jpg'));
+// Function wajib satu region dengan database: setiap permintaan beberapa kali bolak-balik ke
+// Postgres. Proyek Supabase saat ini di Mumbai (ap-south-1) -> bom1. Tanpa ini Vercel memakai iad1.
+const functionRegion = process.env.FUNCTION_REGION?.trim() || 'bom1';
 await writeFile(
   path.join(fnDir, '.vc-config.json'),
-  JSON.stringify({ runtime: 'nodejs22.x', handler: 'index.mjs', launcherType: 'Nodejs', maxDuration: 30, shouldAddHelpers: false }, null, 2),
+  JSON.stringify(
+    { runtime: 'nodejs22.x', handler: 'index.mjs', launcherType: 'Nodejs', maxDuration: 30, shouldAddHelpers: false, regions: [functionRegion] },
+    null,
+    2,
+  ),
 );
 
 // Header yang sama dengan @fastify/helmet di server (lihat server/src/app.ts), untuk berkas statis.
@@ -83,4 +90,4 @@ await writeFile(
     2,
   ),
 );
-console.log(`Build Output Vercel siap di .vercel/output${cronSchedule ? ` (cron pengingat: ${cronSchedule})` : ' (tanpa cron)'}`);
+console.log(`Build Output Vercel siap di .vercel/output, region function ${functionRegion}${cronSchedule ? ` (cron pengingat: ${cronSchedule})` : ' (tanpa cron)'}`);

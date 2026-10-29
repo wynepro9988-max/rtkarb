@@ -126,8 +126,9 @@ komputer operator, untuk migrasi, CLI, dan backup.
    [05-deployment](05-deployment.md) §4). Tautan aktivasi memakai `PUBLIC_BASE_URL`.
 8. **Git:** push repository (`.env`, `.data/`, `backups/`, dan `.vercel/` sudah di-ignore).
 9. **Vercel:** import repository. `vercel.json` sudah menetapkan `buildCommand` dan
-   `installCommand`. Atur Node.js 22.x atau 24.x, region Functions **sama dengan region Supabase**
-   (Mumbai → `bom1`, Singapura → `sin1`),
+   `installCommand`. Atur Node.js 22.x atau 24.x. Region Function ditetapkan oleh build (`FUNCTION_REGION`,
+   bawaan `bom1` = Mumbai, harus sama dengan region Supabase; pengaturan region di dashboard
+   tidak dipakai untuk Build Output API),
    lalu isi variabel §4 dan deploy.
 10. **Verifikasi pertama** (wajib, karena pola ini belum pernah diuji di Vercel sungguhan):
     - `GET /api/health?db=1` → `{"ok":true}`.
