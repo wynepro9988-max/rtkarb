@@ -49,5 +49,5 @@ atau paling netral**. Default ini bukan aturan bisnis yang sudah disetujui.
 | A12 | Paket Vercel | Vercel Hobby **hanya untuk non-komersial**. Aplikasi operasional rumah terapi memerlukan **Pro** (mulai USD 20/bulan) | Setujui biaya Vercel Pro, atau pilih hosting lain (VPS, [05](05-deployment.md)) |
 | A13 | Backup Supabase Free | Supabase Free **tanpa backup otomatis**. Backup berjalan lewat skrip dari komputer operator | Siapa yang menjalankan backup mingguan dan di mana disimpan, atau naik ke Supabase Pro (backup harian) |
 | A14 | Jeda proyek Supabase Free | Proyek dijeda setelah 1 minggu tanpa aktivitas, sehingga libur panjang bisa menghentikan aplikasi | Terima risikonya, aktifkan cron harian Vercel ke `/api/health?db=1`, atau naik ke Pro |
-| A15 | Lokasi data | Region terdekat Supabase/Vercel adalah Singapura, sehingga data pasien tersimpan di luar Indonesia | Konfirmasi kepatuhan UU PDP (transfer data lintas negara, persetujuan wali) |
+| A15 | Lokasi data | Proyek Supabase dibuat di Mumbai (India) karena Singapura tidak dapat dipilih, sehingga data pasien tersimpan di luar Indonesia | Konfirmasi kepatuhan UU PDP (transfer data lintas negara, persetujuan wali) |
 | A11 | Data aplikasi lama | Tidak ditemukan dan tidak dimigrasi | Di mana sistem lama berada, berapa lama dipertahankan, dan perlukah diarsipkan? |

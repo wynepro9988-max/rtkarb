@@ -19,7 +19,7 @@ agar tidak melewatinya, dan langkah setup.
 | 4 | Koneksi langsung (direct) Supabase Free hanya IPv6. Pooler bersama berjalan di IPv4 ([connecting](https://supabase.com/docs/guides/database/connecting-to-postgres)) | Vercel memakai **transaction pooler** (port 6543); migrasi/backup memakai **session pooler** (port 5432) |
 | 5 | Body request/response Vercel Function maksimal **4,5 MB** ([limitations](https://vercel.com/docs/functions/limitations)) | Batas unggah diturunkan menjadi **4 MB** |
 | 6 | Data API Supabase otomatis mengekspos schema `public` ([securing your API](https://supabase.com/docs/guides/api/securing-your-api)) | Migrasi `004` mencabut semua hak `anon`/`authenticated`/`service_role`. **Matikan juga Data API** di dashboard (§5 langkah 5) |
-| 7 | Tidak ada region Supabase/Vercel di Indonesia; yang terdekat Singapura | Data pasien akan tersimpan di luar negeri. Perlu dinilai terhadap UU PDP (lihat keputusan terbuka) |
+| 7 | Tidak ada region Supabase/Vercel di Indonesia. Saat proyek dibuat (29 Okt 2026), Singapura tidak dapat dipilih, sehingga proyek dibuat di **South Asia (Mumbai)** | Data pasien tersimpan di India. Perlu dinilai terhadap UU PDP (lihat keputusan terbuka). Function Vercel **wajib** di region yang sama (`bom1`) |
 
 ## 2. Batas paket Free & cara aplikasi menjaganya
 
@@ -103,14 +103,12 @@ komputer operator, untuk migrasi, CLI, dan backup.
 
 ## 5. Langkah setup
 
-1. **Supabase:** buat proyek di region **Southeast Asia (Singapore)** dan simpan
-   password `postgres`.
-2. **Role database.** Jalankan di SQL Editor sebagai `postgres`, dengan password acak yang panjang:
-   ```sql
-   CREATE ROLE rtka_owner LOGIN PASSWORD '<acak>';
-   CREATE ROLE rtka_app LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '<acak>';
-   GRANT USAGE, CREATE ON SCHEMA public TO rtka_owner;
-   ```
+1. **Supabase:** buat proyek di region **Southeast Asia (Singapore)**. Bila tidak dapat dipilih,
+   pakai **South Asia (Mumbai)** seperti proyek saat ini. Simpan password `postgres`.
+2. **Role database & bucket.** Tempel seluruh isi [supabase-setup.sql](supabase-setup.sql) ke
+   SQL Editor, lalu Run. Skrip ini membuat `rtka_owner`, `rtka_app` (sandi acak, tampil sekali
+   di hasil query), dan bucket privat `dokumen-pasien` (PDF/JPG/PNG, maks. 4 MB). Seluruh
+   perubahan dibatalkan bila pemeriksaan hak role atau bucket gagal.
 3. **Sertifikat:** Dashboard → Database → SSL Configuration → *Download certificate*.
    Simpan sebagai `DB_SSL_CA_FILE` (komputer operator) dan `DB_SSL_CA` (Vercel).
 4. **Migrasi** dari komputer operator (session pooler):
@@ -121,14 +119,15 @@ komputer operator, untuk migrasi, CLI, dan backup.
 5. **Matikan Data API:** Dashboard → Integrations → Data API → *Enable Data API* = off.
    Aplikasi tidak memakainya, dan migrasi `004` sudah mencabut hak role-nya sebagai
    lapis kedua.
-6. **Storage:** buat bucket **privat** `dokumen-pasien` (*Public bucket* = off) dengan
-   *file size limit* 4 MB, lalu buat **secret key** (Settings → API Keys).
+6. **Storage:** pastikan bucket `dokumen-pasien` tercantum dan *Public* = off, lalu buat
+   **secret key** (Settings → API Keys).
 7. **Tenant & owner:** jalankan `npm run admin -- create-org …` dan `invite-owner …` dari
    komputer operator dengan `DATABASE_ADMIN_URL` Supabase (lihat
    [05-deployment](05-deployment.md) §4). Tautan aktivasi memakai `PUBLIC_BASE_URL`.
 8. **Git:** push repository (`.env`, `.data/`, `backups/`, dan `.vercel/` sudah di-ignore).
 9. **Vercel:** import repository. `vercel.json` sudah menetapkan `buildCommand` dan
-   `installCommand`. Atur Node.js 22.x atau 24.x, region Functions **Singapore (sin1)**,
+   `installCommand`. Atur Node.js 22.x atau 24.x, region Functions **sama dengan region Supabase**
+   (Mumbai → `bom1`, Singapura → `sin1`),
    lalu isi variabel §4 dan deploy.
 10. **Verifikasi pertama** (wajib, karena pola ini belum pernah diuji di Vercel sungguhan):
     - `GET /api/health?db=1` → `{"ok":true}`.
