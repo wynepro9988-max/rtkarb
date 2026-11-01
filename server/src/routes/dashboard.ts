@@ -119,7 +119,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
 
       if (can(ctx, 'staff.read')) {
         out.activeStaff = (
-          await db.one<{ count: number }>(`SELECT count(*) AS count FROM memberships WHERE organization_id = $1 AND status = 'active'`, [ctx.orgId])
+          await db.one<{ count: number }>(`SELECT count(*) AS count FROM memberships WHERE organization_id = $1 AND status = 'active' AND role <> 'wali'`, [ctx.orgId])
         ).count;
       }
       return out;

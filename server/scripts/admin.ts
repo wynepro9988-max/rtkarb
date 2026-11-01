@@ -3,10 +3,10 @@
 //
 //   npm run admin -- create-org --name "Rumah Bintang ..." [--timezone Asia/Jakarta] [--patient-prefix RB] [--receipt-prefix KW]
 //   npm run admin -- list-orgs
-//   npm run admin -- invite-owner --org <id> --email <email> --name "<nama>"
+//   npm run admin -- invite-owner --org <id> --phone <no-whatsapp> --name "<nama>"
 //   npm run admin -- create-platform-admin --email <email> --name "<nama>"
 //   npm run admin -- set-org-status --org <id> --status active|inactive
-//   npm run admin -- disable-user --email <email>
+//   npm run admin -- disable-user --username <username> | --email <email>
 //   npm run admin -- db-usage
 //   npm run admin -- archive-audit --before YYYY-MM-DD --out <file.jsonl.gz>
 import { createWriteStream } from 'node:fs';
@@ -17,6 +17,7 @@ import { createGzip } from 'node:zlib';
 import { parseArgs } from 'node:util';
 import pg from 'pg';
 import { sslFromEnv } from '../src/db.ts';
+import { normalizePhone } from '../src/routes/reminders.ts';
 import { hashPassword, passwordProblem } from '../src/security/password.ts';
 import { newToken, sha256Hex } from '../src/security/tokens.ts';
 
@@ -109,7 +110,7 @@ const commands: Record<string, (args: Record<string, string | undefined>) => Pro
       (
         await c.query(
           `SELECT o.id, o.name, o.status, o.created_at::date AS dibuat,
-                  (SELECT count(*) FROM memberships m WHERE m.organization_id = o.id AND m.status = 'active') AS staf_aktif
+                  (SELECT count(*) FROM memberships m WHERE m.organization_id = o.id AND m.status = 'active' AND m.role <> 'wali') AS staf_aktif
              FROM organizations o ORDER BY o.created_at`,
         )
       ).rows,
@@ -118,23 +119,24 @@ const commands: Record<string, (args: Record<string, string | undefined>) => Pro
   },
 
   async 'invite-owner'(a) {
-    if (!a.org || !a.email || !a.name) fail('--org, --email, dan --name wajib diisi');
-    const email = a.email.trim().toLowerCase();
+    if (!a.org || !a.phone || !a.name) fail('--org, --phone, dan --name wajib diisi');
+    const phone = normalizePhone(a.phone);
+    if (!phone) fail('Nomor WhatsApp tidak valid. Contoh: 081234567890');
     const token = newToken();
     await withAdmin(async (c) => {
       const org = await c.query(`SELECT 1 FROM organizations WHERE id = $1 AND status = 'active'`, [a.org]);
       if (org.rowCount === 0) fail('Organisasi tidak ditemukan atau tidak aktif');
-      const user = await c.query(`SELECT 1 FROM users WHERE email = $1`, [email]);
-      if (user.rowCount) fail('Email ini sudah memiliki akun');
+      const user = await c.query(`SELECT 1 FROM users WHERE phone = $1`, [phone]);
+      if (user.rowCount) fail('Nomor ini sudah memiliki akun');
       await c.query(
         `UPDATE account_tokens SET revoked_at = now()
-          WHERE organization_id = $1 AND purpose = 'undangan' AND email = $2 AND used_at IS NULL AND revoked_at IS NULL`,
-        [a.org, email],
+          WHERE organization_id = $1 AND purpose = 'undangan' AND phone = $2 AND used_at IS NULL AND revoked_at IS NULL`,
+        [a.org, phone],
       );
       const { rows } = await c.query<{ id: string }>(
-        `INSERT INTO account_tokens (organization_id, purpose, token_hash, email, full_name, role, expires_at)
+        `INSERT INTO account_tokens (organization_id, purpose, token_hash, phone, full_name, role, expires_at)
          VALUES ($1, 'undangan', $2, $3, $4, 'owner', now() + make_interval(hours => $5)) RETURNING id`,
-        [a.org, sha256Hex(token), email, a.name, OWNER_INVITE_HOURS],
+        [a.org, sha256Hex(token), phone, a.name, OWNER_INVITE_HOURS],
       );
       await cliAudit(c, a.org!, 'platform.owner_diundang', 'invitation', rows[0].id);
     });
@@ -177,12 +179,12 @@ const commands: Record<string, (args: Record<string, string | undefined>) => Pro
   },
 
   async 'disable-user'(a) {
-    if (!a.email) fail('--email wajib diisi');
+    if (!a.username && !a.email) fail('--username atau --email wajib diisi');
     await withAdmin(async (c) => {
       const { rows } = await c.query<{ id: string; organization_id: string | null }>(
-        `UPDATE users u SET status = 'disabled' WHERE email = $1
+        `UPDATE users u SET status = 'disabled' WHERE username = $1 OR email = $1
          RETURNING id, (SELECT organization_id FROM memberships m WHERE m.user_id = u.id) AS organization_id`,
-        [a.email!.trim().toLowerCase()],
+        [(a.username ?? a.email)!.trim().toLowerCase()],
       );
       if (rows.length === 0) fail('Pengguna tidak ditemukan');
       await c.query(`UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, [rows[0].id]);
@@ -248,7 +250,7 @@ if (!handler) fail(`Perintah tersedia: ${Object.keys(commands).join(', ')}`);
 const { values } = parseArgs({
   args: rest,
   options: Object.fromEntries(
-    ['name', 'timezone', 'patient-prefix', 'receipt-prefix', 'org', 'email', 'status', 'before', 'out'].map((k) => [k, { type: 'string' as const }]),
+    ['name', 'timezone', 'patient-prefix', 'receipt-prefix', 'org', 'email', 'phone', 'username', 'status', 'before', 'out'].map((k) => [k, { type: 'string' as const }]),
   ),
   strict: true,
 });

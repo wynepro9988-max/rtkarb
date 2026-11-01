@@ -90,9 +90,9 @@ app.<domain-rtka>.id {
 
 ```bash
 npm run admin -- create-org --name "<Nama resmi organisasi A>" --patient-prefix RBA
-npm run admin -- invite-owner --org <ID-A> --email <email-owner-A> --name "<Nama owner A>"
+npm run admin -- invite-owner --org <ID-A> --phone <whatsapp-owner-A> --name "<Nama owner A>"
 npm run admin -- create-org --name "<Nama resmi organisasi B>" --patient-prefix RBB
-npm run admin -- invite-owner --org <ID-B> --email <email-owner-B> --name "<Nama owner B>"
+npm run admin -- invite-owner --org <ID-B> --phone <whatsapp-owner-B> --name "<Nama owner B>"
 npm run admin -- list-orgs   # catat kedua ID permanen
 ```
 

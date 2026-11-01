@@ -16,12 +16,13 @@ import {
 
 export const SESSION_COOKIE = 'rb_sid';
 
-export type Mode = 'tenant' | 'support' | 'platform';
+export type Mode = 'tenant' | 'support' | 'platform' | 'portal';
 
 export interface AuthContext {
   sessionId: string;
   userId: string;
-  email: string;
+  email: string | null;
+  username: string | null;
   fullName: string;
   csrfToken: string;
   mode: Mode;
@@ -82,8 +83,8 @@ export async function resolveAuth(app: FastifyInstance, req: FastifyRequest): Pr
     if (!s) return null;
 
     await setLocal(db, { 'app.user_id': s.userId });
-    const user = await db.maybe<{ id: string; email: string; fullName: string; status: string; platformRole: string | null }>(
-      `SELECT id, email, full_name, status, platform_role FROM users WHERE id = $1`,
+    const user = await db.maybe<{ id: string; email: string | null; username: string | null; fullName: string; status: string; platformRole: string | null }>(
+      `SELECT id, email, username, full_name, status, platform_role FROM users WHERE id = $1`,
       [s.userId],
     );
     const revoke = () => db.exec(`UPDATE sessions SET revoked_at = now() WHERE id = $1`, [s.id]);
@@ -96,6 +97,7 @@ export async function resolveAuth(app: FastifyInstance, req: FastifyRequest): Pr
       sessionId: s.id,
       userId: user.id,
       email: user.email,
+      username: user.username,
       fullName: user.fullName,
       csrfToken: s.csrfToken,
     };
@@ -161,7 +163,7 @@ export async function resolveAuth(app: FastifyInstance, req: FastifyRequest): Pr
       }
       ctx = {
         ...base,
-        mode: 'tenant',
+        mode: m.role === 'wali' ? 'portal' : 'tenant',
         orgId: m.organizationId,
         orgName: m.name,
         timezone: m.timezone,
@@ -200,10 +202,17 @@ export function needAuth(req: FastifyRequest): AuthContext {
 // Pengguna harus berada dalam konteks organisasi dan memiliki salah satu permission.
 export function needTenant(req: FastifyRequest, ...anyOf: Permission[]): AuthContext {
   const ctx = needAuth(req);
-  if (!ctx.orgId || ctx.mode === 'platform') {
+  if (!ctx.orgId || ctx.mode === 'platform' || ctx.mode === 'portal') {
     throw forbidden('Akun ini tidak memiliki akses ke data organisasi');
   }
   if (anyOf.length > 0 && !anyOf.some((p) => ctx.permissions.has(p))) throw forbidden();
+  return ctx;
+}
+
+// Dasbor orang tua. Akun wali tidak pernah melewati needTenant, jadi seluruh rute staf tertutup.
+export function needPortal(req: FastifyRequest): AuthContext {
+  const ctx = needAuth(req);
+  if (ctx.mode !== 'portal' || !ctx.orgId || !ctx.permissions.has('portal.view')) throw forbidden('Halaman ini khusus orang tua/wali');
   return ctx;
 }
 
@@ -219,7 +228,7 @@ export function can(ctx: AuthContext, ...anyOf: Permission[]): boolean {
 
 // Transaksi data tenant: konteks RLS di-set lokal. Mode dukungan = READ ONLY.
 export function tenantTx<T>(app: FastifyInstance, ctx: AuthContext, fn: (db: Db) => Promise<T>): Promise<T> {
-  if (!ctx.orgId) throw forbidden('Akun ini tidak memiliki akses ke data organisasi');
+  if (!ctx.orgId || ctx.mode === 'portal') throw forbidden('Akun ini tidak memiliki akses ke data organisasi');
   const scopes = dataScopes(ctx.permissions);
   return withTx(
     app.pool,
@@ -238,6 +247,30 @@ export function tenantTx<T>(app: FastifyInstance, ctx: AuthContext, fn: (db: Db)
     },
     fn,
   );
+}
+
+// Transaksi dasbor orang tua: READ ONLY di database, cakupan staf semuanya tertutup. Yang terlihat
+// hanya hasil kebijakan RLS portal, yaitu anak yang terhubung ke app.member_id.
+export function portalTx<T>(app: FastifyInstance, ctx: AuthContext, fn: (db: Db) => Promise<T>): Promise<T> {
+  return withTx(app.pool, { readOnly: true, settings: portalSettings(ctx) }, fn);
+}
+
+// Hanya untuk menulis audit pembacaan portal; transaksi datanya sendiri tetap READ ONLY.
+export function portalAuditTx<T>(app: FastifyInstance, ctx: AuthContext, fn: (db: Db) => Promise<T>): Promise<T> {
+  return withTx(app.pool, { settings: portalSettings(ctx) }, fn);
+}
+
+function portalSettings(ctx: AuthContext) {
+  return {
+    'app.mode': 'portal',
+    'app.org_id': ctx.orgId,
+    'app.user_id': ctx.userId,
+    'app.member_id': ctx.memberId,
+    'app.scope_patient': 'none',
+    'app.scope_note': 'none',
+    'app.scope_finance': 'none',
+    'app.scope_audit': 'none',
+  };
 }
 
 // Transaksi tugas terjadwal (cron) untuk SATU organisasi, tanpa pengguna. Cakupan hanya
@@ -268,6 +301,9 @@ export function authTx<T>(app: FastifyInstance, fn: (db: Db) => Promise<T>, toke
   return withTx(app.pool, { settings: { 'app.mode': 'auth', 'app.token_hash': tokenHash ?? null } }, fn);
 }
 
+// Organisasi pengguna sendiri, bukan organisasi yang dibuka lewat mode dukungan.
+export const ownOrgId = (ctx: AuthContext) => (ctx.mode === 'tenant' || ctx.mode === 'portal' ? ctx.orgId : null);
+
 // Transaksi untuk tindakan atas akun sendiri (ganti kata sandi, logout).
 export function selfTx<T>(app: FastifyInstance, ctx: AuthContext, fn: (db: Db) => Promise<T>): Promise<T> {
   return withTx(
@@ -276,7 +312,7 @@ export function selfTx<T>(app: FastifyInstance, ctx: AuthContext, fn: (db: Db) =
       settings: {
         'app.mode': 'self',
         'app.user_id': ctx.userId,
-        'app.org_id': ctx.mode === 'tenant' ? ctx.orgId : null,
+        'app.org_id': ownOrgId(ctx),
       },
     },
     fn,
@@ -299,7 +335,7 @@ export function clearSessionCookie(app: FastifyInstance, reply: FastifyReply): v
 
 export function describeContext(ctx: AuthContext) {
   return {
-    user: { id: ctx.userId, email: ctx.email, fullName: ctx.fullName },
+    user: { id: ctx.userId, email: ctx.email, username: ctx.username, fullName: ctx.fullName },
     mode: ctx.mode,
     organization: ctx.orgId ? { id: ctx.orgId, name: ctx.orgName, timezone: ctx.timezone } : null,
     membership: ctx.memberId

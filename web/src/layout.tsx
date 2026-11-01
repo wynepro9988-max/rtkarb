@@ -13,6 +13,7 @@ interface NavItem {
 }
 
 const SECTIONS: { title: string; items: NavItem[] }[] = [
+  { title: 'Orang tua', items: [{ to: '/orang-tua', label: 'Dasbor Anak', icon: 'home', perms: ['portal.view'] }] },
   {
     title: 'Layanan',
     items: [
@@ -49,11 +50,16 @@ function initials(name: string) {
   return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? (parts.at(-1)?.[0] ?? '') : '')).toUpperCase();
 }
 
+const PORTAL_PATHS = ['/orang-tua', '/profil'];
+
+export const homePath = (mode: string | undefined) => (mode === 'platform' ? '/platform' : mode === 'portal' ? '/orang-tua' : '/dasbor');
+
 export function RequireAuth() {
   const { me, loading } = useAuth();
   const location = useLocation();
   if (loading) return <Loading />;
   if (!me) return <Navigate to="/masuk" replace state={{ from: location.pathname }} />;
+  if (me.mode === 'portal' && !PORTAL_PATHS.includes(location.pathname)) return <Navigate to="/orang-tua" replace />;
   return <AppShell />;
 }
 
@@ -120,7 +126,7 @@ function AppShell() {
             </span>
             <div>
               <strong>{me.user.fullName}</strong>
-              <span>{me.user.email}</span>
+              <span>{me.user.username ?? me.user.email}</span>
             </div>
           </div>
           <div className="nav">
@@ -170,7 +176,7 @@ function AppShell() {
 
 export function HomeRedirect() {
   const { me } = useAuth();
-  return <Navigate to={me?.mode === 'platform' ? '/platform' : '/dasbor'} replace />;
+  return <Navigate to={homePath(me?.mode)} replace />;
 }
 
 export function NotFound() {

@@ -30,7 +30,7 @@ konsisten dan dapat ditelusuri.
 |---|---|
 | `server/migrations` (3 file) | Skema 20 tabel, RLS di semua tabel bisnis, FK komposit tenant, hak per kolom, tabel append-only |
 | `server/src` | API Fastify: auth & sesi, otorisasi terpusat, 14 modul rute |
-| `server/test` (15 file) | 135 test integrasi terhadap PostgreSQL sungguhan |
+| `server/test` (16 file) | 158 test integrasi terhadap PostgreSQL sungguhan |
 | `server/scripts` | migrasi berchecksum, CLI administrasi platform, seeder DEMO (khusus `*_dev`) |
 | `web/src` | 17 halaman React berbahasa Indonesia, responsif, dan dapat dicetak (kuitansi) |
 | `android/` | Aplikasi Android native (Java, WebView aman, tanpa dependensi pihak ketiga) |
@@ -48,7 +48,7 @@ Server PostgreSQL lain di mesin ini (port 5432) **tidak disentuh**.
 
 ## 5. Test yang dijalankan & hasil
 
-`npm test`: **15 file, 135 test, 135 lulus, 0 gagal** (run terakhir 29 Okt 2026).
+`npm test`: **16 file, 158 test, 158 lulus, 0 gagal** (run terakhir 1 Nov 2026).
 Test memakai data sintetis (label DEMO, email `.invalid`).
 
 | File | Jumlah | Cakupan (acceptance criteria §13 master prompt) |
@@ -366,4 +366,47 @@ pertamanya. Jam tetap bisa diatur owner masing-masing; bawaannya 3 jam.
 - Uji mutasi: bila pengelompokan dimatikan, 3 test gagal.
 - Diperiksa di browser dengan dua sesi DEMO sementara (dihapus lagi): satu baris
   "pukul 15:00, 16:00" dan pesan "pukul 15:00 dan 16:00".
+
+## 20. Login username, undangan WhatsApp, dan dasbor orang tua (1 Nov 2026)
+
+**Keputusan owner:** login memakai username, undangan lewat WhatsApp tanpa email, ada dasbor
+orang tua, dan akun orang tua berasal dari undangan admin.
+
+**Username**
+
+- Migrasi `009`: `users.username` dan `users.phone`; `email` boleh kosong, tetapi setiap akun wajib
+  punya email atau username. Format username tanpa `@`, jadi satu kolom login tidak pernah ambigu.
+- `POST /auth/login` menerima `identifier` (username atau email). Akun email lama tetap dapat
+  masuk dan dapat mengatur username di Profil (`POST /auth/username`, wajib kata sandi saat ini).
+- Username unik lintas organisasi karena halaman login tidak memilih organisasi.
+- Staf memilih username sendiri saat aktivasi; halaman aktivasi mengusulkannya dari nama.
+
+**Undangan WhatsApp**
+
+- `POST /staff/invitations` menerima nomor WhatsApp, bukan email. Tautan dibuka di `wa.me` ke
+  nomor tujuan. Aplikasi tidak mengirim pesan sendiri; yang mengundang menekan tombol kirim.
+- CLI `invite-owner` memakai `--phone`.
+- **Risiko yang diterima:** token aktivasi ada di teks pesan, jadi melewati WhatsApp. Token
+  sekali pakai, berlaku 72 jam, dan disimpan sebagai hash.
+
+**Dasbor orang tua**
+
+- Peran baru `wali`, mode sesi `portal`. `needTenant` selalu menolak mode portal, sehingga seluruh
+  rute staf tertutup walau permission keliru. Test menelusuri semua rute di `server/src/routes`,
+  jadi rute baru otomatis ikut diperiksa.
+- `GET /portal` berjalan dalam transaksi READ ONLY.
+- RLS: kebijakan baru hanya tambahan dan khusus SELECT (`guardians`, `patients`, `appointments`,
+  `patient_packages`, `invoices`, `payments`, `refunds`, `therapy_notes`) lewat `app_is_guardian()`.
+  Kebijakan staf tidak diubah. Draf catatan, revisi, dokumen, dan audit tidak terbuka untuk portal.
+- Yang tampil: jadwal, riwayat sesi, kehadiran bulan ini, paket, tagihan, dan catatan terapis final
+  (K8). Catatan admin, alasan pembatalan, dan harga per sesi tidak dikirim.
+- Kebijakan RESTRICTIVE menutup untuk portal: revisi catatan, penugasan terapis, katalog paket,
+  penomoran, log notifikasi, sesi login, serta akun orang tua lain. Test memeriksa seluruh tabel
+  terhadap daftar yang disetujui, jadi membuka tabel baru harus berupa keputusan sadar.
+- `GET /portal/notes` dimuat saat tab *Catatan terapis* dibuka dan dicatat sebagai
+  `catatan.dilihat_wali`. Editor catatan memberi tahu terapis bahwa catatan final dibaca orang tua.
+- Admin dan owner mengundang dari data wali di halaman pasien (`guardian.invite`). Nomor yang sudah
+  punya akun wali di organisasi yang sama langsung dihubungkan (kakak-adik) tanpa undangan baru.
+- Mencabut akses atau menghapus wali terakhir menutup akun dan sesinya seketika. Anonimisasi pasien
+  menghapus baris wali, sehingga akses putus dan undangan yang tertunda ikut gugur.
 

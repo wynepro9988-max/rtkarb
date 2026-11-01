@@ -30,7 +30,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-// Dipakai saat email tidak ditemukan agar waktu respons login setara.
+// Dipakai saat akun tidak ditemukan agar waktu respons login setara.
 let dummyHash: Promise<string> | null = null;
 export async function burnPasswordCheck(password: string): Promise<void> {
   dummyHash ??= hashPassword(randomBytes(12).toString('hex'));
@@ -40,11 +40,14 @@ export async function burnPasswordCheck(password: string): Promise<void> {
 export const PASSWORD_MIN = 10;
 export const PASSWORD_MAX = 128;
 
-export function passwordProblem(password: string, email?: string): string | null {
+// `identities`: email dan/atau username akun; kata sandi tidak boleh memuat bagian namanya.
+export function passwordProblem(password: string, ...identities: (string | null | undefined)[]): string | null {
   if (password.length < PASSWORD_MIN) return `Kata sandi minimal ${PASSWORD_MIN} karakter`;
   if (password.length > PASSWORD_MAX) return `Kata sandi maksimal ${PASSWORD_MAX} karakter`;
-  if (email && password.toLowerCase().includes(email.split('@')[0].toLowerCase())) {
-    return 'Kata sandi tidak boleh memuat nama email';
+  for (const identity of identities) {
+    if (identity && password.toLowerCase().includes(identity.split('@')[0].toLowerCase())) {
+      return 'Kata sandi tidak boleh memuat username atau nama email';
+    }
   }
   if (/^(.)\1+$/.test(password)) return 'Kata sandi terlalu mudah ditebak';
   return null;

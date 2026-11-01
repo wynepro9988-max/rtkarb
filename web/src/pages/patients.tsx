@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, del, downloadUrl, get, patch, post, put, qs, useApi } from '../api.ts';
 import { useAuth } from '../auth.tsx';
+import { LinkResult } from '../components/link-result.tsx';
 import {
   ageLabel,
   APPT_STATUS,
@@ -278,10 +279,85 @@ export function PatientDetailPage() {
   );
 }
 
+type GuardianLink = { title: string; url: string; expiresAt: string; phone?: string | null };
+
+// Akses dasbor orang tua untuk satu wali: belum diundang, menunggu aktivasi, atau sudah punya akun.
+function GuardianAccount({ guardian: g, reload, onLink }: { guardian: any; reload: () => void; onLink: (l: GuardianLink) => void }) {
+  const { can, me } = useAuth();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  if (!can('guardian.invite')) return null;
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+      reload();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Terjadi kesalahan', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const invite = () =>
+    run(async () => {
+      const r = await post('/guardians/' + g.id + '/invite');
+      if (r.linked) toast('Anak ini dihubungkan ke akun wali yang sudah ada');
+      else onLink({ title: 'Tautan aktivasi dasbor orang tua', url: r.url, expiresAt: r.expiresAt, phone: r.phone });
+    });
+  const reset = () =>
+    run(async () => {
+      if (!confirm(`Buat tautan atur ulang kata sandi untuk ${g.fullName}?`)) return;
+      const r = await post('/guardians/' + g.id + '/reset-link');
+      onLink({ title: 'Tautan atur ulang kata sandi', url: r.url, expiresAt: r.expiresAt, phone: r.phone });
+    });
+  const revoke = (question: string, done: string) =>
+    run(async () => {
+      if (!confirm(question)) return;
+      await post('/guardians/' + g.id + '/revoke-access');
+      toast(done);
+    });
+
+  if (g.memberId) {
+    return (
+      <div className="guardian-account">
+        <Badge tone="ok">Dasbor aktif</Badge> <span className="small muted">{g.accountUsername}</span>
+        <button className="btn btn-sm btn-ghost" disabled={busy} onClick={reset}>
+          Tautan reset sandi
+        </button>
+        <button className="btn btn-sm btn-ghost" disabled={busy} onClick={() => revoke(`Cabut akses ${g.fullName} ke data anak ini?`, 'Akses dicabut')}>
+          Cabut akses
+        </button>
+      </div>
+    );
+  }
+  if (g.inviteExpiresAt) {
+    return (
+      <div className="guardian-account">
+        <Badge tone="warn">Diundang</Badge> <span className="small muted">sampai {formatDateTime(g.inviteExpiresAt, me?.organization?.timezone)}</span>
+        <button className="btn btn-sm btn-ghost" disabled={busy} onClick={invite}>
+          Buat tautan baru
+        </button>
+        <button className="btn btn-sm btn-ghost" disabled={busy} onClick={() => revoke('Batalkan undangan ini?', 'Undangan dibatalkan')}>
+          Batalkan
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="guardian-account">
+      <button className="btn btn-sm btn-secondary" disabled={busy || !g.phone} onClick={invite} title={g.phone ? undefined : 'Isi nomor WhatsApp wali terlebih dahulu'}>
+        Undang ke dasbor orang tua
+      </button>
+    </div>
+  );
+}
+
 function ProfileTab({ patient: p, reload }: { patient: any; reload: () => void }) {
   const { can } = useAuth();
   const [guardian, setGuardian] = useState<any | null>(null);
   const [assigning, setAssigning] = useState(false);
+  const [link, setLink] = useState<GuardianLink | null>(null);
   const toast = useToast();
 
   return (
@@ -316,7 +392,7 @@ function ProfileTab({ patient: p, reload }: { patient: any; reload: () => void }
           {p.guardians.length === 0 ? <Empty title="Belum ada data wali" /> : null}
           {p.guardians.map((g: any) => (
             <div key={g.id} className="card-body spread" style={{ borderBottom: '1px solid var(--c-border)' }}>
-              <div>
+              <div className="guardian-main">
                 <strong>{g.fullName}</strong> {g.isPrimary ? <Badge tone="star">Utama</Badge> : null}
                 <div className="small muted">
                   {g.relationship}
@@ -324,6 +400,7 @@ function ProfileTab({ patient: p, reload }: { patient: any; reload: () => void }
                   {g.email ? ` · ${g.email}` : ''}
                 </div>
                 {g.waOptOut ? <div className="small muted">Menolak pengingat WhatsApp otomatis</div> : null}
+                <GuardianAccount guardian={g} reload={reload} onLink={setLink} />
               </div>
               {can('patient.manage') ? (
                 <button className="btn btn-sm btn-ghost" onClick={() => setGuardian(g)}>
@@ -363,6 +440,7 @@ function ProfileTab({ patient: p, reload }: { patient: any; reload: () => void }
           <PatientPrivacyPanel patient={p} onChanged={reload} />
         </div>
       ) : null}
+      {link ? <LinkResult {...link} onClose={() => setLink(null)} /> : null}
       {guardian ? (
         <GuardianDialog
           patientId={p.id}

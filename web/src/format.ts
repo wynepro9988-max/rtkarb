@@ -54,6 +54,9 @@ export function ageLabel(birthDate: string | null | undefined, today: string) {
   return y > 0 ? `${y} th${m ? ` ${m} bln` : ''}` : `${m} bln`;
 }
 
+// 62812... -> 0812...
+export const formatPhone = (phone: string | null | undefined) => (phone ? `0${phone.slice(2)}` : '—');
+
 export const APPT_STATUS: Record<string, { label: string; tone: string }> = {
   terjadwal: { label: 'Terjadwal', tone: 'info' },
   selesai: { label: 'Selesai', tone: 'ok' },

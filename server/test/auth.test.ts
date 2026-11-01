@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Agent, buildTenant, createMember, json, login, ORIGIN, PASSWORD, setupEnv, uniq, type Tenant, type TestEnv } from './helpers.ts';
+import { Agent, buildTenant, createMember, json, login, ORIGIN, PASSWORD, setupEnv, testPhone, testUsername, uniq, type Tenant, type TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let A: Tenant;
@@ -25,8 +25,8 @@ describe('Autentikasi', () => {
   });
 
   it('pesan gagal login sama untuk email tidak dikenal dan kata sandi salah', async () => {
-    const unknown = await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'tidak.ada@demo.invalid', password: 'salahsalah' } });
-    const wrong = await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: A.admin.email, password: 'salahsalah' } });
+    const unknown = await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { identifier: 'tidak.ada@demo.invalid', password: 'salahsalah' } });
+    const wrong = await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { identifier: A.admin.email, password: 'salahsalah' } });
     expect(unknown.statusCode).toBe(401);
     expect(wrong.statusCode).toBe(401);
     expect(json(unknown).error.message).toBe(json(wrong).error.message);
@@ -35,9 +35,9 @@ describe('Autentikasi', () => {
   it('akun dikunci sementara setelah 5 kali gagal, termasuk untuk kata sandi benar', async () => {
     const victim = await createMember(env.adminPool, A.orgId, 'admin', 'kunci');
     for (let i = 0; i < 5; i++) {
-      await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: victim.email, password: 'salah-salah-salah' } });
+      await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { identifier: victim.email, password: 'salah-salah-salah' } });
     }
-    const res = await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: victim.email, password: PASSWORD } });
+    const res = await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { identifier: victim.email, password: PASSWORD } });
     expect(res.statusCode).toBe(401);
     const { rows } = await env.adminPool.query(`SELECT locked_until > now() AS locked FROM users WHERE id = $1`, [victim.userId]);
     expect(rows[0].locked).toBe(true);
@@ -48,7 +48,7 @@ describe('Autentikasi', () => {
     const limited = await buildApp({ ...env.config, authRateLimitPerMinute: 3 }, env.appPool);
     const codes: number[] = [];
     for (let i = 0; i < 5; i++) {
-      const r = await limited.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'x@demo.invalid', password: 'salahsalah' } });
+      const r = await limited.inject({ method: 'POST', url: '/api/auth/login', payload: { identifier: 'x@demo.invalid', password: 'salahsalah' } });
       codes.push(r.statusCode);
     }
     await limited.close();
@@ -59,7 +59,7 @@ describe('Autentikasi', () => {
   it('akun nonaktif ditolak saat login', async () => {
     const m = await createMember(env.adminPool, A.orgId, 'admin', 'nonaktif');
     await env.adminPool.query(`UPDATE users SET status = 'disabled' WHERE id = $1`, [m.userId]);
-    const res = await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: m.email, password: PASSWORD } });
+    const res = await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { identifier: m.email, password: PASSWORD } });
     expect(res.statusCode).toBe(401);
   });
 
@@ -90,7 +90,7 @@ describe('Autentikasi', () => {
     expect(res.headers['cache-control']).toBe('no-store');
     expect(String(res.headers['content-security-policy'])).toContain("frame-ancestors 'none'");
     expect(res.headers['x-content-type-options']).toBe('nosniff');
-    const cookie = (await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: A.admin.email, password: PASSWORD } })).cookies[0];
+    const cookie = (await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { identifier: A.admin.email, password: PASSWORD } })).cookies[0];
     expect(cookie.httpOnly).toBe(true);
     expect(cookie.sameSite).toBe('Lax');
   });
@@ -99,20 +99,20 @@ describe('Autentikasi', () => {
 describe('Keanggotaan & pengelolaan staf', () => {
   it('owner mengundang staf, staf aktivasi lewat tautan sekali pakai, lalu bisa login ke organisasi yang benar', async () => {
     const owner = await login(env.app, A.owner.email);
-    const email = `baru.${uniq()}@demo.invalid`;
-    const inv = await owner.post('/api/staff/invitations', { email, fullName: 'DEMO Staf Baru', role: 'terapis' });
+    const username = testUsername('baru');
+    const inv = await owner.post('/api/staff/invitations', { phone: testPhone(), fullName: 'DEMO Staf Baru', role: 'terapis' });
     expect(inv.statusCode).toBe(201);
     const token = tokenFrom(json(inv).url);
 
     const info = await env.app.inject({ method: 'POST', url: '/api/auth/token-info', payload: { token }, headers: { origin: ORIGIN } });
     expect(json(info).organizationName).toBe(A.name);
 
-    const accept = await env.app.inject({ method: 'POST', url: '/api/auth/accept-invitation', payload: { token, password: 'SandiBaruAman#1' } });
+    const accept = await env.app.inject({ method: 'POST', url: '/api/auth/accept-invitation', payload: { token, username, password: 'SandiBaruAman#1' } });
     expect(accept.statusCode).toBe(200);
-    const again = await env.app.inject({ method: 'POST', url: '/api/auth/accept-invitation', payload: { token, password: 'SandiBaruAman#1' } });
+    const again = await env.app.inject({ method: 'POST', url: '/api/auth/accept-invitation', payload: { token, username, password: 'SandiBaruAman#1' } });
     expect(again.statusCode).toBe(400);
 
-    const staff = await login(env.app, email, 'SandiBaruAman#1');
+    const staff = await login(env.app, username, 'SandiBaruAman#1');
     const me = json(await staff.get('/api/auth/me'));
     expect(me.organization.id).toBe(A.orgId);
     expect(me.membership.role).toBe('terapis');
@@ -121,7 +121,7 @@ describe('Keanggotaan & pengelolaan staf', () => {
 
   it('peran owner tidak dapat diberikan lewat aplikasi (validasi API & kebijakan database)', async () => {
     const owner = await login(env.app, A.owner.email);
-    const inv = await owner.post('/api/staff/invitations', { email: `o.${uniq()}@demo.invalid`, fullName: 'DEMO Calon Owner', role: 'owner' });
+    const inv = await owner.post('/api/staff/invitations', { phone: testPhone(), fullName: 'DEMO Calon Owner', role: 'owner' });
     expect(inv.statusCode).toBe(400);
     const patch = await owner.patch(`/api/staff/${A.admin.memberId}`, { role: 'owner' });
     expect(patch.statusCode).toBe(400);
@@ -135,7 +135,7 @@ describe('Keanggotaan & pengelolaan staf', () => {
   it('admin/terapis/keuangan tidak dapat mengelola staf', async () => {
     for (const p of [A.admin, A.therapist, A.finance]) {
       const agent = await login(env.app, p.email);
-      const res = await agent.post('/api/staff/invitations', { email: `x.${uniq()}@demo.invalid`, fullName: 'DEMO X', role: 'admin' });
+      const res = await agent.post('/api/staff/invitations', { phone: testPhone(), fullName: 'DEMO X', role: 'admin' });
       expect(res.statusCode).toBe(403);
     }
   });
@@ -150,18 +150,20 @@ describe('Keanggotaan & pengelolaan staf', () => {
     expect(list.some((m) => m.id === B.therapist.memberId)).toBe(false);
   });
 
-  it('mengundang email yang sudah terdaftar di organisasi lain tidak membocorkan informasi ke pengundang', async () => {
+  it('mengundang nomor yang sudah dipakai staf organisasi lain tidak membocorkan informasi dan akun lama tidak pindah organisasi', async () => {
+    const phone = testPhone();
+    const normalized = `62${phone.slice(1)}`;
+    await env.adminPool.query(`UPDATE users SET phone = $2 WHERE id = $1`, [A.therapist.userId, normalized]);
     const ownerB = await login(env.app, B.owner.email);
-    const res = await ownerB.post('/api/staff/invitations', { email: A.therapist.email, fullName: 'DEMO Coba', role: 'terapis' });
+    const res = await ownerB.post('/api/staff/invitations', { phone, fullName: 'DEMO Coba', role: 'terapis' });
     // Respons sama seperti undangan biasa.
     expect(res.statusCode).toBe(201);
-    // Penerima (pemilik email) yang mendapat penjelasan saat aktivasi, dan tetap tidak pindah organisasi.
     const accept = await env.app.inject({
       method: 'POST',
       url: '/api/auth/accept-invitation',
-      payload: { token: tokenFrom(json(res).url), password: 'SandiBaruAman#1' },
+      payload: { token: tokenFrom(json(res).url), username: testUsername('lintas'), password: 'SandiBaruAman#1' },
     });
-    expect(accept.statusCode).toBe(409);
+    expect(accept.statusCode).toBe(200);
     const { rows } = await env.adminPool.query(`SELECT organization_id FROM memberships WHERE user_id = $1`, [A.therapist.userId]);
     expect(rows).toEqual([{ organization_id: A.orgId }]);
   });
@@ -182,7 +184,7 @@ describe('Keanggotaan & pengelolaan staf', () => {
     expect((await owner.post(`/api/staff/${m.memberId}/deactivate`)).statusCode).toBe(200);
     expect((await staff.get('/api/patients')).statusCode).toBe(401);
     // Login baru juga ditolak.
-    const relogin = await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: m.email, password: PASSWORD } });
+    const relogin = await env.app.inject({ method: 'POST', url: '/api/auth/login', payload: { identifier: m.email, password: PASSWORD } });
     expect(relogin.statusCode).toBe(401);
   });
 
@@ -211,8 +213,8 @@ describe('Keanggotaan & pengelolaan staf', () => {
 
   it('kata sandi lemah ditolak dan hash tidak pernah dikirim ke klien', async () => {
     const owner = await login(env.app, A.owner.email);
-    const inv = json(await owner.post('/api/staff/invitations', { email: `lemah.${uniq()}@demo.invalid`, fullName: 'DEMO Lemah', role: 'admin' }));
-    const weak = await env.app.inject({ method: 'POST', url: '/api/auth/accept-invitation', payload: { token: tokenFrom(inv.url), password: 'pendek' } });
+    const inv = json(await owner.post('/api/staff/invitations', { phone: testPhone(), fullName: 'DEMO Lemah', role: 'admin' }));
+    const weak = await env.app.inject({ method: 'POST', url: '/api/auth/accept-invitation', payload: { token: tokenFrom(inv.url), username: testUsername('lemah'), password: 'pendek' } });
     expect(weak.statusCode).toBe(400);
     const staff = await owner.get('/api/staff');
     expect(staff.body).not.toContain('scrypt$');

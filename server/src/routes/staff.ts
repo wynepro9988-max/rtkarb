@@ -7,6 +7,7 @@ import type { Db } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { idParam, parse, zOptText, zText } from '../http.ts';
 import { newToken, sha256Hex } from '../security/tokens.ts';
+import { normalizePhone } from './reminders.ts';
 
 const INVITE_HOURS = 72;
 const RESET_HOURS = 24;
@@ -15,7 +16,8 @@ const RESET_HOURS = 24;
 const assignableRole = z.enum(['admin', 'terapis', 'keuangan']);
 
 const inviteBody = z.object({
-  email: z.email('Email tidak valid').trim().toLowerCase().max(200),
+  // Nomor WhatsApp tujuan undangan. Staf memilih username sendiri saat aktivasi.
+  phone: zText(8, 40),
   fullName: zText(2, 150),
   role: assignableRole,
   isTherapist: z.boolean().default(false),
@@ -47,7 +49,8 @@ async function loadEditableMember(db: Db, orgId: string, memberId: string, selfM
     `SELECT id, user_id, role, status, is_therapist, handles_finance FROM memberships WHERE organization_id = $1 AND id = $2 FOR UPDATE`,
     [orgId, memberId],
   );
-  if (!m) throw notFound('Staf');
+  // Akun wali dikelola dari data wali di halaman pasien, bukan sebagai staf.
+  if (!m || m.role === 'wali') throw notFound('Staf');
   if (m.id === selfMemberId) throw forbidden('Anda tidak dapat mengubah akses akun Anda sendiri');
   if (m.role === 'owner') throw forbidden('Akun owner hanya dapat diubah melalui prosedur administrasi');
   return m;
@@ -58,10 +61,10 @@ export async function staffRoutes(app: FastifyInstance) {
     const ctx = needTenant(req, 'staff.read');
     const rows = await tenantTx(app, ctx, (db) =>
       db.many<{ role: Role; handlesFinance: boolean }>(
-        `SELECT m.id, m.user_id, u.full_name, u.email, m.role, m.status, m.is_therapist, m.handles_finance, m.specialization,
+        `SELECT m.id, m.user_id, u.full_name, u.email, u.username, u.phone, m.role, m.status, m.is_therapist, m.handles_finance, m.specialization,
                 m.created_at, m.deactivated_at, u.last_login_at
            FROM memberships m JOIN users u ON u.id = m.user_id
-          WHERE m.organization_id = $1
+          WHERE m.organization_id = $1 AND m.role <> 'wali'
           ORDER BY m.status, CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'terapis' THEN 2 ELSE 3 END, u.full_name`,
         [ctx.orgId],
       ),
@@ -87,13 +90,13 @@ export async function staffRoutes(app: FastifyInstance) {
     const ctx = needTenant(req, 'staff.manage');
     return tenantTx(app, ctx, (db) =>
       db.many(
-        `SELECT t.id, t.email, t.full_name, t.role, t.is_therapist, t.handles_finance, t.specialization, t.expires_at, t.used_at, t.revoked_at, t.created_at,
+        `SELECT t.id, t.email, t.phone, t.full_name, t.role, t.is_therapist, t.handles_finance, t.specialization, t.expires_at, t.used_at, t.revoked_at, t.created_at,
                 CASE WHEN t.used_at IS NOT NULL THEN 'dipakai'
                      WHEN t.revoked_at IS NOT NULL THEN 'dibatalkan'
                      WHEN t.expires_at <= now() THEN 'kedaluwarsa'
                      ELSE 'menunggu' END AS state
            FROM account_tokens t
-          WHERE t.organization_id = $1 AND t.purpose = 'undangan'
+          WHERE t.organization_id = $1 AND t.purpose = 'undangan' AND t.role <> 'wali'
           ORDER BY t.created_at DESC LIMIT 100`,
         [ctx.orgId],
       ),
@@ -104,28 +107,30 @@ export async function staffRoutes(app: FastifyInstance) {
     const ctx = needTenant(req, 'staff.manage');
     const body = parse(inviteBody, req.body);
     if (body.handlesFinance && body.role !== 'admin') throw badRequest(ONLY_ADMIN_FINANCE);
+    const phone = normalizePhone(body.phone);
+    if (!phone) throw badRequest('Nomor WhatsApp tidak valid. Contoh: 081234567890');
     const token = newToken();
     const result = await tenantTx(app, ctx, async (db) => {
       // Hanya memeriksa staf organisasi sendiri; keberadaan akun di organisasi lain tidak terlihat.
       const already = await db.maybe(
-        `SELECT 1 FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.organization_id = $1 AND u.email = $2`,
-        [ctx.orgId, body.email],
+        `SELECT 1 FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.organization_id = $1 AND m.role <> 'wali' AND u.phone = $2`,
+        [ctx.orgId, phone],
       );
-      if (already) throw conflict('Email ini sudah terdaftar sebagai staf organisasi Anda');
+      if (already) throw conflict('Nomor ini sudah terdaftar sebagai staf organisasi Anda');
       await db.exec(
         `UPDATE account_tokens SET revoked_at = now()
-          WHERE organization_id = $1 AND purpose = 'undangan' AND email = $2 AND used_at IS NULL AND revoked_at IS NULL`,
-        [ctx.orgId, body.email],
+          WHERE organization_id = $1 AND purpose = 'undangan' AND role <> 'wali' AND phone = $2 AND used_at IS NULL AND revoked_at IS NULL`,
+        [ctx.orgId, phone],
       );
       const t = await db.one<{ id: string; expiresAt: Date }>(
         `INSERT INTO account_tokens
-           (organization_id, purpose, token_hash, email, full_name, role, is_therapist, handles_finance, specialization, created_by, expires_at)
+           (organization_id, purpose, token_hash, phone, full_name, role, is_therapist, handles_finance, specialization, created_by, expires_at)
          VALUES ($1, 'undangan', $2, $3, $4, $5, $6, $7, $8, $9, now() + make_interval(hours => $10))
          RETURNING id, expires_at`,
         [
           ctx.orgId,
           sha256Hex(token),
-          body.email,
+          phone,
           body.fullName,
           body.role,
           body.isTherapist || body.role === 'terapis',
@@ -142,6 +147,7 @@ export async function staffRoutes(app: FastifyInstance) {
     return reply.status(201).send({
       id: result.id,
       expiresAt: result.expiresAt,
+      phone,
       url: `${app.config.publicBaseUrl}/aktivasi#token=${token}`,
     });
   });
@@ -233,7 +239,7 @@ export async function staffRoutes(app: FastifyInstance) {
     const t = await tenantTx(app, ctx, async (db) => {
       const m = await loadEditableMember(db, ctx.orgId!, id, ctx.memberId);
       if (m.status !== 'active') throw conflict('Aktifkan kembali staf sebelum membuat tautan reset');
-      const u = await db.one<{ email: string }>(`SELECT email FROM users WHERE id = $1`, [m.userId]);
+      const u = await db.one<{ email: string | null; phone: string | null }>(`SELECT email, phone FROM users WHERE id = $1`, [m.userId]);
       await db.exec(
         `UPDATE account_tokens SET revoked_at = now()
           WHERE organization_id = $1 AND purpose = 'reset_sandi' AND user_id = $2 AND used_at IS NULL AND revoked_at IS NULL`,
@@ -245,8 +251,8 @@ export async function staffRoutes(app: FastifyInstance) {
         [ctx.orgId, sha256Hex(token), u.email, m.userId, ctx.userId, RESET_HOURS],
       );
       await audit(db, req, ctx, { action: 'staf.tautan_reset_dibuat', entityType: 'membership', entityId: id });
-      return row;
+      return { ...row, phone: u.phone };
     });
-    return { expiresAt: t.expiresAt, url: `${app.config.publicBaseUrl}/reset-sandi#token=${token}` };
+    return { expiresAt: t.expiresAt, phone: t.phone, url: `${app.config.publicBaseUrl}/reset-sandi#token=${token}` };
   });
 }

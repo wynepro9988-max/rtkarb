@@ -2,8 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { ApiError, get, post, setCsrfToken } from './api.ts';
 
 export interface Me {
-  user: { id: string; email: string; fullName: string };
-  mode: 'tenant' | 'support' | 'platform';
+  user: { id: string; email: string | null; username: string | null; fullName: string };
+  mode: 'tenant' | 'support' | 'platform' | 'portal';
   organization: { id: string; name: string; timezone: string } | null;
   membership: { id: string; role: string; roleLabel: string; isTherapist: boolean } | null;
   permissions: string[];

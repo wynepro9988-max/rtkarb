@@ -22,7 +22,7 @@ npm install
 npm run db:init        # cluster PostgreSQL khusus proyek (port 54330), role rtka_owner + rtka_app, menulis .env
 npm run db:migrate     # menerapkan server/migrations/*.sql
 npm run seed:demo      # opsional: dua organisasi DEMO berisi data sintetis
-npm test               # 135 test (database uji dibuat ulang setiap kali)
+npm test               # 158 test (database uji dibuat ulang setiap kali)
 
 npm run dev:server     # API di http://127.0.0.1:3000
 npm run dev:web        # UI di http://localhost:5173 (proxy /api ke :3000)
@@ -41,9 +41,9 @@ Gunakan CLI administrasi, bukan antarmuka web:
 
 ```bash
 npm run admin -- create-org --name "RTKA Rumah Bintang <Nama A>" --patient-prefix RBA
-npm run admin -- invite-owner --org <id-org-A> --email owner-a@... --name "Nama Owner A"
+npm run admin -- invite-owner --org <id-org-A> --phone 08xxxxxxxxxx --name "Nama Owner A"
 npm run admin -- create-org --name "RTKA Rumah Bintang <Nama B>" --patient-prefix RBB
-npm run admin -- invite-owner --org <id-org-B> --email owner-b@... --name "Nama Owner B"
+npm run admin -- invite-owner --org <id-org-B> --phone 08xxxxxxxxxx --name "Nama Owner B"
 ```
 
 Setiap owner menerima tautan aktivasi sekali pakai dan mengatur kata sandinya

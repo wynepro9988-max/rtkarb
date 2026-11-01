@@ -407,10 +407,16 @@ function RequestDialog({ orgs, onClose, onSaved }: { orgs: any[]; onClose: () =>
 // Profil & keamanan akun
 // ---------------------------------------------------------------------------
 export function ProfilePage() {
-  const { me } = useAuth();
+  const { me, reload } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
   const [f, setF] = useState({ currentPassword: '', newPassword: '', confirm: '' });
+  const [u, setU] = useState({ username: me?.user.username ?? '', currentPassword: '' });
+  const usernameForm = useSubmit(() => post('/auth/username', u), () => {
+    toast('Username disimpan. Gunakan username ini saat masuk berikutnya.');
+    setU({ ...u, currentPassword: '' });
+    reload();
+  });
   const { busy, error, submit } = useSubmit(() => post('/auth/change-password', { currentPassword: f.currentPassword, newPassword: f.newPassword }), () => {
     toast('Kata sandi diganti. Sesi di perangkat lain telah ditutup.');
     setF({ currentPassword: '', newPassword: '', confirm: '' });
@@ -431,8 +437,14 @@ export function ProfilePage() {
           <dl className="kv">
             <dt>Nama</dt>
             <dd>{me.user.fullName}</dd>
-            <dt>Email</dt>
-            <dd>{me.user.email}</dd>
+            <dt>Username</dt>
+            <dd>{me.user.username ?? 'Belum diatur'}</dd>
+            {me.user.email ? (
+              <>
+                <dt>Email</dt>
+                <dd>{me.user.email}</dd>
+              </>
+            ) : null}
             <dt>Organisasi</dt>
             <dd>{me.organization?.name ?? 'Platform'}</dd>
             <dt>Peran</dt>
@@ -441,6 +453,25 @@ export function ProfilePage() {
           <button className="btn btn-secondary" style={{ marginTop: 16 }} onClick={logoutAll}>
             Keluar dari semua perangkat
           </button>
+        </section>
+        <section className="card card-pad">
+          <h2 style={{ marginBottom: 12 }}>{me.user.username ? 'Ganti username' : 'Atur username'}</h2>
+          <form className="form" onSubmit={usernameForm.submit}>
+            <Field label="Username" hint="3–32 karakter: huruf kecil, angka, titik, garis bawah, atau tanda hubung.">
+              {(id) => (
+                <input id={id} className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} value={u.username} onChange={(e) => setU({ ...u, username: e.target.value.toLowerCase() })} required minLength={3} maxLength={32} />
+              )}
+            </Field>
+            <Field label="Kata sandi saat ini">
+              {(id) => <input id={id} className="input" type="password" autoComplete="current-password" value={u.currentPassword} onChange={(e) => setU({ ...u, currentPassword: e.target.value })} required />}
+            </Field>
+            <ErrorBox error={usernameForm.error} />
+            <div className="form-actions">
+              <button className="btn" disabled={usernameForm.busy}>
+                Simpan username
+              </button>
+            </div>
+          </form>
         </section>
         <section className="card card-pad">
           <h2 style={{ marginBottom: 12 }}>Ganti kata sandi</h2>

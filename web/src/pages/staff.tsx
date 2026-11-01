@@ -1,54 +1,9 @@
 import { useState } from 'react';
 import { patch, post, useApi } from '../api.ts';
 import { useAuth } from '../auth.tsx';
-import { formatDateTime, ROLE_OPTIONS } from '../format.ts';
+import { LinkResult } from '../components/link-result.tsx';
+import { formatDateTime, formatPhone, ROLE_OPTIONS } from '../format.ts';
 import { Badge, Dialog, Empty, ErrorBox, Field, Icon, Loading, PageHeader, useSubmit, useToast } from '../ui.tsx';
-
-function LinkResult({ title, url, expiresAt, email, onClose }: { title: string; url: string; expiresAt: string; email?: string; onClose: () => void }) {
-  const toast = useToast();
-  const { me } = useAuth();
-  return (
-    <Dialog title={title} onClose={onClose}>
-      <div className="stack">
-        <div className="alert warn">
-          Tautan ini hanya ditampilkan <strong>sekali</strong>. Kirimkan langsung kepada orang yang bersangkutan (mis. lewat WhatsApp pribadi). Jangan bagikan di grup.
-        </div>
-        <textarea className="textarea mono" readOnly value={url} onFocus={(e) => e.target.select()} style={{ minHeight: 80 }} aria-label="Tautan" />
-        <p className="small muted">Berlaku sampai {formatDateTime(expiresAt, me?.organization?.timezone)} dan hanya dapat dipakai sekali.</p>
-        <div className="form-actions">
-          <a
-            className="btn btn-secondary"
-            href={`https://wa.me/?text=${encodeURIComponent(`${title} Rumah Bintang (sekali pakai, jangan diteruskan):\n${url}`)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Kirim lewat WhatsApp
-          </a>
-          {email ? (
-            <a
-              className="btn btn-secondary"
-              href={`mailto:${email}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(`Tautan berikut berlaku sekali pakai, jangan diteruskan:\n${url}`)}`}
-            >
-              Kirim lewat email
-            </a>
-          ) : null}
-          <button
-            className="btn btn-secondary"
-            onClick={async () => {
-              await navigator.clipboard.writeText(url);
-              toast('Tautan disalin');
-            }}
-          >
-            Salin tautan
-          </button>
-          <button className="btn" onClick={onClose}>
-            Selesai
-          </button>
-        </div>
-      </div>
-    </Dialog>
-  );
-}
 
 // Hanya untuk peran admin: owner memutuskan per admin apakah ia juga memegang keuangan.
 function FinanceCheck({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
@@ -73,13 +28,13 @@ export function StaffPage() {
   const { data: invitations, reload: reloadInv } = useApi<any[]>(manage ? '/staff/invitations' : null);
   const [inviting, setInviting] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
-  const [link, setLink] = useState<{ title: string; url: string; expiresAt: string; email?: string } | null>(null);
+  const [link, setLink] = useState<{ title: string; url: string; expiresAt: string; phone?: string | null } | null>(null);
 
-  const action = async (path: string, message: string, confirmText?: string, email?: string) => {
+  const action = async (path: string, message: string, confirmText?: string) => {
     if (confirmText && !confirm(confirmText)) return;
     try {
       const r = await post<any>(path);
-      if (r?.url) setLink({ title: 'Tautan atur ulang kata sandi', url: r.url, expiresAt: r.expiresAt, email });
+      if (r?.url) setLink({ title: 'Tautan atur ulang kata sandi', url: r.url, expiresAt: r.expiresAt, phone: r.phone });
       else toast(message);
       reload();
       reloadInv();
@@ -127,7 +82,7 @@ export function StaffPage() {
                     <tr key={m.id}>
                       <td data-label="Nama">
                         <strong>{m.fullName}</strong> {self ? <Badge tone="info">Anda</Badge> : null}
-                        <div className="small muted">{m.email}</div>
+                        <div className="small muted">{m.username ?? m.email}</div>
                       </td>
                       <td data-label="Peran">
                         {m.roleLabel}
@@ -149,7 +104,7 @@ export function StaffPage() {
                               </button>
                               {m.status === 'active' ? (
                                 <>
-                                  <button className="btn btn-sm btn-ghost" onClick={() => action(`/staff/${m.id}/reset-link`, '', `Buat tautan atur ulang kata sandi untuk ${m.fullName}?`, m.email)}>
+                                  <button className="btn btn-sm btn-ghost" onClick={() => action(`/staff/${m.id}/reset-link`, '', `Buat tautan atur ulang kata sandi untuk ${m.fullName}?`)}>
                                     Reset sandi
                                   </button>
                                   <button
@@ -186,7 +141,7 @@ export function StaffPage() {
           {pending.map((i) => (
             <div key={i.id} className="card-body spread" style={{ borderBottom: '1px solid var(--c-border)' }}>
               <div>
-                <strong>{i.fullName}</strong> <span className="muted">· {i.email}</span>
+                <strong>{i.fullName}</strong> <span className="muted">· {i.phone ? formatPhone(i.phone) : i.email}</span>
                 <div className="small muted">
                   {i.role === 'admin' && i.handlesFinance ? 'Admin & Keuangan' : ROLE_OPTIONS.find((r) => r.value === i.role)?.label} · berlaku s.d. {formatDateTime(i.expiresAt, me?.organization?.timezone)}
                 </div>
@@ -204,7 +159,7 @@ export function StaffPage() {
           onClose={() => setInviting(false)}
           onDone={(r) => {
             setInviting(false);
-            setLink({ title: 'Tautan aktivasi akun', url: r.url, expiresAt: r.expiresAt, email: r.email });
+            setLink({ title: 'Tautan aktivasi akun', url: r.url, expiresAt: r.expiresAt, phone: r.phone });
             reloadInv();
           }}
         />
@@ -215,25 +170,25 @@ export function StaffPage() {
   );
 }
 
-function InviteDialog({ onClose, onDone }: { onClose: () => void; onDone: (r: { url: string; expiresAt: string; email: string }) => void }) {
-  const [f, setF] = useState({ email: '', fullName: '', role: 'terapis', isTherapist: false, handlesFinance: false, specialization: '' });
+function InviteDialog({ onClose, onDone }: { onClose: () => void; onDone: (r: { url: string; expiresAt: string; phone: string }) => void }) {
+  const [f, setF] = useState({ phone: '', fullName: '', role: 'terapis', isTherapist: false, handlesFinance: false, specialization: '' });
   const { busy, error, submit } = useSubmit(
-    async () => ({
-      ...(await post<{ url: string; expiresAt: string }>('/staff/invitations', {
+    () =>
+      post<{ url: string; expiresAt: string; phone: string }>('/staff/invitations', {
         ...f,
         handlesFinance: f.role === 'admin' && f.handlesFinance,
         specialization: f.specialization || null,
-      })),
-      email: f.email,
-    }),
+      }),
     onDone,
   );
   return (
     <Dialog title="Undang staf" onClose={onClose}>
       <form className="form" onSubmit={submit}>
-        <p className="small muted">Sistem membuat tautan aktivasi sekali pakai (berlaku 72 jam). Staf mengatur kata sandinya sendiri — tidak ada kata sandi default.</p>
+        <p className="small muted">Sistem membuat tautan aktivasi sekali pakai (berlaku 72 jam) untuk dikirim lewat WhatsApp. Staf memilih username dan kata sandinya sendiri, tidak ada kata sandi default.</p>
         <Field label="Nama lengkap">{(id) => <input id={id} className="input" value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} required minLength={2} />}</Field>
-        <Field label="Email">{(id) => <input id={id} className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required />}</Field>
+        <Field label="Nomor WhatsApp" hint="Contoh: 081234567890">
+          {(id) => <input id={id} className="input" type="tel" autoComplete="off" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} required />}
+        </Field>
         <Field label="Peran">
           {(id) => (
             <select id={id} className="select" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>

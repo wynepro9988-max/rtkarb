@@ -89,6 +89,10 @@ export async function createOrg(admin: pg.Pool, name: string): Promise<string> {
   return rows[0].id;
 }
 
+// Nomor WhatsApp dan username sintetis yang unik per pemanggilan.
+export const testPhone = () => `08${Math.floor(1_000_000_000 + Math.random() * 8_999_999_999)}`;
+export const testUsername = (label = 'uji') => `${label}.${uniq()}`.toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 32);
+
 export async function createUser(admin: pg.Pool, label: string, platformAdmin = false): Promise<{ userId: string; email: string }> {
   const email = `${label}.${uniq()}@demo.invalid`.toLowerCase();
   const { rows } = await admin.query<{ id: string }>(
@@ -198,7 +202,7 @@ export class Agent {
 }
 
 export async function login(app: FastifyInstance, email: string, password = PASSWORD): Promise<Agent> {
-  const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password }, headers: { origin: ORIGIN } });
+  const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { identifier: email, password }, headers: { origin: ORIGIN } });
   if (res.statusCode !== 200) throw new Error(`Login gagal (${res.statusCode}): ${res.body}`);
   const agent = new Agent(app);
   const sid = res.cookies.find((c) => c.name === 'rb_sid');

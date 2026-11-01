@@ -14,6 +14,7 @@ import { CompensationPage } from './pages/compensation.tsx';
 import { DashboardPage } from './pages/dashboard.tsx';
 import { FinancePage, ReceiptPage } from './pages/finance.tsx';
 import { NoteEditorPage } from './pages/notes.tsx';
+import { PortalPage } from './pages/portal.tsx';
 import { PatientDetailPage, PatientsPage } from './pages/patients.tsx';
 import { PrivacyPage } from './pages/privacy.tsx';
 import { RemindersPage } from './pages/reminders.tsx';
@@ -33,6 +34,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <HomeRedirect /> },
       { path: 'dasbor', element: <DashboardPage /> },
+      { path: 'orang-tua', element: <PortalPage /> },
       { path: 'jadwal', element: <SchedulePage /> },
       { path: 'pasien', element: <PatientsPage /> },
       { path: 'pasien/:id', element: <PatientDetailPage /> },

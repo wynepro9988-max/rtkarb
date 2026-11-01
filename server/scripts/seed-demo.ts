@@ -94,8 +94,8 @@ async function seedOrg(letter: 'A' | 'B', prefix: string) {
     );
     patients.push(p.id);
     await q(
-      `INSERT INTO guardians (organization_id, patient_id, full_name, relationship, phone, is_primary) VALUES ($1, $2, $3, $4, '0800-0000-DEMO', true)`,
-      [orgId, p.id, `DEMO Wali ${letter}${i}`, i % 2 ? 'Ibu' : 'Ayah'],
+      `INSERT INTO guardians (organization_id, patient_id, full_name, relationship, phone, is_primary) VALUES ($1, $2, $3, $4, $5, true)`,
+      [orgId, p.id, `DEMO Wali ${letter}${i}`, i % 2 ? 'Ibu' : 'Ayah', `080000${letter === 'A' ? 1 : 2}000${String(i).padStart(2, '0')}`],
     );
     const therapist = i % 2 ? t1 : t2;
     await q(`INSERT INTO patient_therapists (organization_id, patient_id, member_id) VALUES ($1, $2, $3)`, [orgId, p.id, therapist.memberId]);

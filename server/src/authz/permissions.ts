@@ -1,7 +1,7 @@
 // Matriks permission. Role tenant bersifat tetap; perubahan matriks ini adalah
 // keputusan kebijakan dan harus dicatat di docs/02-desain-teknis.md.
 
-export const ROLES = ['owner', 'admin', 'terapis', 'keuangan'] as const;
+export const ROLES = ['owner', 'admin', 'terapis', 'keuangan', 'wali'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -9,6 +9,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   admin: 'Admin / Koordinator',
   terapis: 'Terapis',
   keuangan: 'Keuangan / Kasir',
+  wali: 'Orang Tua / Wali',
 };
 
 export const PERMISSIONS = [
@@ -62,6 +63,10 @@ export const PERMISSIONS = [
   'privacy.manage',
   // Menghubungkan nomor WhatsApp/token Fonnte & kebijakan pengingat otomatis (hanya owner).
   'whatsapp.manage',
+  // Mengundang orang tua/wali ke dasbor orang tua, mencabut aksesnya, dan membuat tautan reset.
+  'guardian.invite',
+  // Dasbor orang tua. Hanya untuk peran wali; bukan bagian dari izin staf.
+  'portal.view',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -69,7 +74,8 @@ const OWNER: Permission[] = PERMISSIONS.filter(
   (p) =>
     !p.endsWith('.assigned') &&
     !p.endsWith('.own') &&
-    p !== 'session.complete.own',
+    p !== 'session.complete.own' &&
+    p !== 'portal.view',
 );
 
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
@@ -91,6 +97,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'document.read',
     'document.upload',
     'reminder.send',
+    'guardian.invite',
   ],
   // Hanya pasien yang ditugaskan; tidak ada akses keuangan.
   terapis: [
@@ -124,6 +131,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'invoice.create',
     'finance.reconcile',
   ],
+  // Hanya dasbor orang tua, untuk anak yang terhubung ke akunnya (mode portal, baca-saja).
+  wali: ['portal.view'],
 };
 
 // Cakupan yang boleh diminta untuk akses dukungan teknis. Semuanya baca-saja;

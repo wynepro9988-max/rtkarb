@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { post } from '../api.ts';
 import { useAuth } from '../auth.tsx';
 import { formatDateTime } from '../format.ts';
+import { homePath } from '../layout.tsx';
 import { ErrorBox, Field, Loading, LOGO_ALT, logoUrl, useSubmit } from '../ui.tsx';
 
 // Busur bintang dari logo, digambar ulang sebagai latar dekoratif (bukan pengganti logo).
@@ -34,7 +35,7 @@ function AuthCard({ title, lead, children }: { title: string; lead?: string; chi
         <StarArc />
         <p className="auth-aside-name">Rumah Bintang</p>
         <p className="auth-aside-tag">Pusat Kemandirian dan Tumbuh Kembang Anak</p>
-        <p className="auth-aside-foot">Data anak hanya dapat dibuka oleh staf organisasinya sendiri, dan setiap akses tercatat.</p>
+        <p className="auth-aside-foot">Data anak hanya dapat dibuka oleh staf organisasinya dan orang tua yang terhubung.</p>
       </aside>
       <main className="auth-main">
         <div className="auth-card">
@@ -44,7 +45,7 @@ function AuthCard({ title, lead, children }: { title: string; lead?: string; chi
           <h1>{title}</h1>
           {lead ? <p className="lead">{lead}</p> : null}
           {children}
-          <p className="auth-foot">Data anak dilindungi. Setiap akses tercatat.</p>
+          <p className="auth-foot">Data anak dilindungi.</p>
         </div>
       </main>
     </div>
@@ -55,22 +56,24 @@ export function LoginPage() {
   const { me, reload } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const { busy, error, submit } = useSubmit(
     async () => {
-      await post('/auth/login', { email, password });
+      await post('/auth/login', { identifier, password });
       return reload();
     },
-    (m) => navigate(m?.mode === 'platform' ? '/platform' : ((location.state as { from?: string } | null)?.from ?? '/dasbor'), { replace: true }),
+    (m) => navigate(m?.mode === 'tenant' ? ((location.state as { from?: string } | null)?.from ?? '/dasbor') : homePath(m?.mode), { replace: true }),
   );
   if (me) return <Navigate to="/" replace />;
 
   return (
     <AuthCard title="Masuk" lead="Gunakan akun yang diberikan oleh pengelola organisasi Anda.">
       <form className="form" onSubmit={submit}>
-        <Field label="Email">
-          {(id) => <input id={id} className="input" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />}
+        <Field label="Username">
+          {(id) => (
+            <input id={id} className="input" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={identifier} onChange={(e) => setIdentifier(e.target.value)} required />
+          )}
         </Field>
         <Field label="Kata sandi">
           {(id) => (
@@ -82,7 +85,7 @@ export function LoginPage() {
           {busy ? 'Memproses…' : 'Masuk'}
         </button>
         <p className="small muted">
-          Lupa kata sandi? Minta tautan reset kepada owner organisasi Anda.
+          Lupa kata sandi? Minta tautan reset kepada pengelola organisasi Anda.
         </p>
       </form>
     </AuthCard>
@@ -100,7 +103,7 @@ function useFragmentToken() {
 
 interface TokenInfo {
   purpose: string;
-  email: string;
+  account: string | null;
   fullName: string | null;
   role: string | null;
   organizationName: string;
@@ -120,6 +123,17 @@ function useTokenInfo(token: string) {
   return { info, error };
 }
 
+// Usulan awal dari nama: "Siti Aminah" -> "siti.aminah".
+function suggestUsername(fullName: string | null) {
+  return (fullName ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '.')
+    .replace(/^\.+|\.+$/g, '')
+    .slice(0, 32);
+}
+
 function PasswordFields({ password, setPassword, confirm, setConfirm }: { password: string; setPassword: (v: string) => void; confirm: string; setConfirm: (v: string) => void }) {
   return (
     <>
@@ -137,15 +151,19 @@ export function ActivatePage() {
   const token = useFragmentToken();
   const { info, error: infoError } = useTokenInfo(token);
   const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [done, setDone] = useState(false);
-  useEffect(() => setFullName(info?.fullName ?? ''), [info]);
-  const { busy, error, submit } = useSubmit(() => post('/auth/accept-invitation', { token, password, fullName }), () => setDone(true));
+  useEffect(() => {
+    setFullName(info?.fullName ?? '');
+    setUsername(suggestUsername(info?.fullName ?? null));
+  }, [info]);
+  const { busy, error, submit } = useSubmit(() => post('/auth/accept-invitation', { token, username, password, fullName }), () => setDone(true));
 
   if (done) {
     return (
-      <AuthCard title="Akun aktif" lead="Akun Anda sudah aktif. Silakan masuk dengan email dan kata sandi baru Anda.">
+      <AuthCard title="Akun aktif" lead={`Akun Anda sudah aktif. Silakan masuk dengan username ${username} dan kata sandi baru Anda.`}>
         <Link className="btn" to="/masuk">
           Masuk
         </Link>
@@ -161,10 +179,29 @@ export function ActivatePage() {
   }
   if (!info) return <Loading />;
   return (
-    <AuthCard title="Aktivasi akun" lead={`Anda diundang bergabung dengan ${info.organizationName}.`}>
+    <AuthCard
+      title="Aktivasi akun"
+      lead={info.role === 'wali' ? `Anda diundang sebagai orang tua/wali di ${info.organizationName}.` : `Anda diundang bergabung dengan ${info.organizationName}.`}
+    >
       <form className="form" onSubmit={submit}>
-        <Field label="Email">{(id) => <input id={id} className="input" value={info.email} disabled />}</Field>
         <Field label="Nama lengkap">{(id) => <input id={id} className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} required minLength={2} />}</Field>
+        <Field label="Username" hint="Dipakai untuk masuk. 3–32 karakter: huruf kecil, angka, titik, garis bawah, atau tanda hubung.">
+          {(id) => (
+            <input
+              id={id}
+              className="input"
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={username}
+              onChange={(e) => setUsername(e.target.value.toLowerCase())}
+              required
+              minLength={3}
+              maxLength={32}
+            />
+          )}
+        </Field>
         <PasswordFields password={password} setPassword={setPassword} confirm={confirm} setConfirm={setConfirm} />
         <p className="small muted">Tautan berlaku sampai {formatDateTime(info.expiresAt)} dan hanya dapat dipakai sekali.</p>
         <ErrorBox error={error} />
@@ -202,7 +239,7 @@ export function ResetPasswordPage() {
   }
   if (!info) return <Loading />;
   return (
-    <AuthCard title="Atur ulang kata sandi" lead={info.email}>
+    <AuthCard title="Atur ulang kata sandi" lead={info.account ? `Untuk akun ${info.account}` : undefined}>
       <form className="form" onSubmit={submit}>
         <PasswordFields password={password} setPassword={setPassword} confirm={confirm} setConfirm={setConfirm} />
         <ErrorBox error={error} />

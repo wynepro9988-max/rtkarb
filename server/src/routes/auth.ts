@@ -6,6 +6,7 @@ import {
   clearSessionCookie,
   describeContext,
   needAuth,
+  ownOrgId,
   selfTx,
   setLocal,
   setSessionCookie,
@@ -17,21 +18,30 @@ import { newToken, sha256Hex } from '../security/tokens.ts';
 
 const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
-const LOGIN_FAILED = 'Email atau kata sandi salah, atau akun sedang dikunci sementara. Coba lagi beberapa saat lagi.';
+const LOGIN_FAILED = 'Username atau kata sandi salah, atau akun sedang dikunci sementara. Coba lagi beberapa saat lagi.';
 const TOKEN_INVALID = 'Tautan tidak valid, sudah dipakai, atau sudah kedaluwarsa. Minta tautan baru kepada pengelola.';
+const USERNAME_TAKEN = 'Username ini sudah dipakai. Pilih username lain.';
 
 const loginBody = z.object({
-  email: z.string().trim().toLowerCase().min(3).max(200),
+  // Username, atau email untuk akun yang sudah ada sebelum login username.
+  identifier: z.string().trim().toLowerCase().min(3).max(200),
   password: z.string().min(1).max(PASSWORD_MAX),
 });
 const tokenBody = z.object({ token: z.string().min(20).max(200) });
 const passwordField = z.string().min(1).max(PASSWORD_MAX);
+const usernameField = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][a-z0-9._-]{2,31}$/, 'Username 3–32 karakter: huruf, angka, titik, garis bawah, atau tanda hubung');
+
+const isUniqueViolation = (err: unknown) => (err as { code?: string }).code === '23505';
 
 export async function authRoutes(app: FastifyInstance) {
   const strict = { config: { rateLimit: { max: app.config.authRateLimitPerMinute, timeWindow: '1 minute' } } };
 
   app.post('/auth/login', strict, async (req, reply) => {
-    const { email, password } = parse(loginBody, req.body);
+    const { identifier, password } = parse(loginBody, req.body);
     const result = await authTx(app, async (db) => {
       const fail = async (userId: string | null, reason: string) => {
         await writeAudit(db, req, { orgId: null, userId }, { action: 'auth.login_gagal', meta: { alasan: reason } });
@@ -47,8 +57,8 @@ export async function authRoutes(app: FastifyInstance) {
         lockedUntil: Date | null;
       }>(
         `SELECT id, password_hash, status, platform_role, failed_login_count, locked_until
-           FROM users WHERE email = $1 FOR UPDATE`,
-        [email],
+           FROM users WHERE username = $1 OR email = $1 FOR UPDATE`,
+        [identifier],
       );
       if (!user) {
         await burnPasswordCheck(password);
@@ -124,7 +134,7 @@ export async function authRoutes(app: FastifyInstance) {
     if (ctx) {
       await selfTx(app, ctx, async (db) => {
         await db.exec(`UPDATE sessions SET revoked_at = now() WHERE id = $1`, [ctx.sessionId]);
-        await writeAudit(db, req, { orgId: ctx.mode === 'tenant' ? ctx.orgId : null, userId: ctx.userId }, { action: 'auth.logout' });
+        await writeAudit(db, req, { orgId: ownOrgId(ctx), userId: ctx.userId }, { action: 'auth.logout' });
       });
     }
     clearSessionCookie(app, reply);
@@ -135,7 +145,7 @@ export async function authRoutes(app: FastifyInstance) {
     const ctx = needAuth(req);
     const count = await selfTx(app, ctx, async (db) => {
       const n = await db.exec(`UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, [ctx.userId]);
-      await writeAudit(db, req, { orgId: ctx.mode === 'tenant' ? ctx.orgId : null, userId: ctx.userId }, {
+      await writeAudit(db, req, { orgId: ownOrgId(ctx), userId: ctx.userId }, {
         action: 'auth.logout_semua',
         meta: { jumlah_sesi: n },
       });
@@ -148,7 +158,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/change-password', strict, async (req) => {
     const ctx = needAuth(req);
     const body = parse(z.object({ currentPassword: passwordField, newPassword: passwordField }), req.body);
-    const problem = passwordProblem(body.newPassword, ctx.email);
+    const problem = passwordProblem(body.newPassword, ctx.email, ctx.username);
     if (problem) throw badRequest(problem);
     if (body.currentPassword === body.newPassword) throw badRequest('Kata sandi baru harus berbeda dari kata sandi lama');
 
@@ -166,8 +176,27 @@ export async function authRoutes(app: FastifyInstance) {
         ctx.userId,
         ctx.sessionId,
       ]);
-      await writeAudit(db, req, { orgId: ctx.mode === 'tenant' ? ctx.orgId : null, userId: ctx.userId }, { action: 'auth.ganti_sandi' });
+      await writeAudit(db, req, { orgId: ownOrgId(ctx), userId: ctx.userId }, { action: 'auth.ganti_sandi' });
     });
+    return { ok: true };
+  });
+
+  // Mengatur username sendiri, terutama untuk akun lama yang masih masuk dengan email.
+  app.post('/auth/username', strict, async (req) => {
+    const ctx = needAuth(req);
+    const body = parse(z.object({ username: usernameField, currentPassword: passwordField }), req.body);
+    try {
+      await selfTx(app, ctx, async (db) => {
+        const u = await db.one<{ passwordHash: string }>(`SELECT password_hash FROM users WHERE id = $1 FOR UPDATE`, [ctx.userId]);
+        if (!(await verifyPassword(body.currentPassword, u.passwordHash))) {
+          throw new HttpError(400, 'Kata sandi saat ini salah', 'wrong_password');
+        }
+        await db.exec(`UPDATE users SET username = $2 WHERE id = $1`, [ctx.userId, body.username]);
+        await writeAudit(db, req, { orgId: ownOrgId(ctx), userId: ctx.userId }, { action: 'auth.ganti_username' });
+      });
+    } catch (err) {
+      throw isUniqueViolation(err) ? conflict(USERNAME_TAKEN) : err;
+    }
     return { ok: true };
   });
 
@@ -178,9 +207,11 @@ export async function authRoutes(app: FastifyInstance) {
     const info = await authTx(
       app,
       (db) =>
-        db.maybe<{ purpose: string; email: string; fullName: string | null; role: string | null; organizationName: string; expiresAt: Date }>(
-          `SELECT t.purpose, t.email, t.full_name, t.role, o.name AS organization_name, t.expires_at
-             FROM account_tokens t JOIN organizations o ON o.id = t.organization_id
+        db.maybe<{ purpose: string; account: string | null; fullName: string | null; role: string | null; organizationName: string; expiresAt: Date }>(
+          `SELECT t.purpose, coalesce(u.username, u.email, t.email) AS account, t.full_name, t.role, o.name AS organization_name, t.expires_at
+             FROM account_tokens t
+             JOIN organizations o ON o.id = t.organization_id
+             LEFT JOIN users u ON u.id = t.user_id
             WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.revoked_at IS NULL AND t.expires_at > now()`,
           [hash],
         ),
@@ -192,43 +223,45 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/auth/accept-invitation', strict, async (req) => {
     const body = parse(
-      tokenBody.extend({ password: passwordField, fullName: z.string().trim().min(2).max(150).optional() }),
+      tokenBody.extend({ username: usernameField, password: passwordField, fullName: z.string().trim().min(2).max(150).optional() }),
       req.body,
     );
     const hash = sha256Hex(body.token);
-    await authTx(
+    const activate = authTx(
       app,
       async (db) => {
         const t = await db.maybe<{
           id: string;
           organizationId: string;
-          email: string;
+          email: string | null;
+          phone: string | null;
           fullName: string;
           role: string;
+          guardianId: string | null;
           isTherapist: boolean;
           handlesFinance: boolean;
           specialization: string | null;
           createdBy: string | null;
         }>(
-          `SELECT id, organization_id, email, full_name, role, is_therapist, handles_finance, specialization, created_by
+          `SELECT id, organization_id, email, phone, full_name, role, guardian_id, is_therapist, handles_finance, specialization, created_by
              FROM account_tokens
             WHERE token_hash = $1 AND purpose = 'undangan' AND used_at IS NULL AND revoked_at IS NULL AND expires_at > now()
             FOR UPDATE`,
           [hash],
         );
         if (!t) throw new HttpError(400, TOKEN_INVALID, 'token_invalid');
-        const problem = passwordProblem(body.password, t.email);
+        const problem = passwordProblem(body.password, t.email, body.username);
         if (problem) throw badRequest(problem);
 
-        const existing = await db.maybe(`SELECT 1 FROM users WHERE email = $1`, [t.email]);
-        if (existing) {
+        if (t.email && (await db.maybe(`SELECT 1 FROM users WHERE email = $1`, [t.email]))) {
           // Pesan ini hanya terlihat oleh pemilik email yang diundang, bukan oleh pengundang.
           throw conflict('Email ini sudah memiliki akun. Satu akun hanya dapat terdaftar pada satu organisasi. Hubungi pengelola.');
         }
+        if (await db.maybe(`SELECT 1 FROM users WHERE username = $1`, [body.username])) throw conflict(USERNAME_TAKEN);
 
         const user = await db.one<{ id: string }>(
-          `INSERT INTO users (email, full_name, password_hash) VALUES ($1, $2, $3) RETURNING id`,
-          [t.email, body.fullName ?? t.fullName, await hashPassword(body.password)],
+          `INSERT INTO users (email, username, phone, full_name, password_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [t.email, body.username, t.phone, body.fullName ?? t.fullName, await hashPassword(body.password)],
         );
         await setLocal(db, { 'app.user_id': user.id });
         const member = await db.one<{ id: string }>(
@@ -236,9 +269,12 @@ export async function authRoutes(app: FastifyInstance) {
            VALUES ($1, $2, $3, $4, $5, $6, $7, $7) RETURNING id`,
           [t.organizationId, user.id, t.role, t.isTherapist || t.role === 'terapis', t.handlesFinance, t.specialization, t.createdBy],
         );
+        if (t.guardianId) {
+          await db.exec(`UPDATE guardians SET member_id = $3 WHERE organization_id = $1 AND id = $2`, [t.organizationId, t.guardianId, member.id]);
+        }
         await db.exec(`UPDATE account_tokens SET used_at = now() WHERE id = $1`, [t.id]);
         await writeAudit(db, req, { orgId: t.organizationId, userId: user.id, memberId: member.id }, {
-          action: 'staf.aktivasi',
+          action: t.role === 'wali' ? 'wali.aktivasi' : 'staf.aktivasi',
           entityType: 'membership',
           entityId: member.id,
           meta: { peran: t.role, undangan_id: t.id },
@@ -246,6 +282,10 @@ export async function authRoutes(app: FastifyInstance) {
       },
       hash,
     );
+    // Dua aktivasi bersamaan dengan username sama: yang kalah ditolak indeks unik.
+    await activate.catch((err) => {
+      throw isUniqueViolation(err) ? conflict(USERNAME_TAKEN) : err;
+    });
     return { ok: true };
   });
 
@@ -255,14 +295,15 @@ export async function authRoutes(app: FastifyInstance) {
     await authTx(
       app,
       async (db) => {
-        const t = await db.maybe<{ id: string; organizationId: string; userId: string; email: string }>(
-          `SELECT id, organization_id, user_id, email FROM account_tokens
-            WHERE token_hash = $1 AND purpose = 'reset_sandi' AND used_at IS NULL AND revoked_at IS NULL AND expires_at > now()
-            FOR UPDATE`,
+        const t = await db.maybe<{ id: string; organizationId: string; userId: string; email: string | null; username: string | null }>(
+          `SELECT t.id, t.organization_id, t.user_id, t.email, u.username
+             FROM account_tokens t JOIN users u ON u.id = t.user_id
+            WHERE t.token_hash = $1 AND t.purpose = 'reset_sandi' AND t.used_at IS NULL AND t.revoked_at IS NULL AND t.expires_at > now()
+            FOR UPDATE OF t`,
           [hash],
         );
         if (!t) throw new HttpError(400, TOKEN_INVALID, 'token_invalid');
-        const problem = passwordProblem(body.password, t.email);
+        const problem = passwordProblem(body.password, t.email, t.username);
         if (problem) throw badRequest(problem);
         await db.exec(
           `UPDATE users SET password_hash = $2, password_changed_at = now(), failed_login_count = 0, locked_until = NULL WHERE id = $1`,

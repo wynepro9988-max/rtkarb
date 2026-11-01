@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { withTx } from '../src/db.ts';
 import { sha256Hex } from '../src/security/tokens.ts';
-import { buildTenant, createMember, createUser, json, localDate, login, setupEnv, uniq, type Tenant, type TestEnv } from './helpers.ts';
+import { buildTenant, createMember, createUser, json, localDate, login, setupEnv, testPhone, testUsername, uniq, type Tenant, type TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let A: Tenant;
@@ -59,7 +59,7 @@ describe('Admin merangkap keuangan (keputusan owner per admin)', () => {
     const owner = await login(env.app, A.owner.email);
     const t = await createMember(env.adminPool, A.orgId, 'terapis', 'bukanadmin');
     expect((await owner.patch(`/api/staff/${t.memberId}`, { handlesFinance: true })).statusCode).toBe(400);
-    const inv = await owner.post('/api/staff/invitations', { email: `k.${uniq()}@demo.invalid`, fullName: 'DEMO Kasir', role: 'keuangan', handlesFinance: true });
+    const inv = await owner.post('/api/staff/invitations', { phone: testPhone(), fullName: 'DEMO Kasir', role: 'keuangan', handlesFinance: true });
     expect(inv.statusCode).toBe(400);
 
     const m = await createMember(env.adminPool, A.orgId, 'admin', 'pindahperan');
@@ -76,17 +76,17 @@ describe('Admin merangkap keuangan (keputusan owner per admin)', () => {
 
   it('undangan admin merangkap keuangan terbawa saat aktivasi, dan kebijakan database menolak aktivasi yang menambah akses', async () => {
     const owner = await login(env.app, A.owner.email);
-    const email = `ak.${uniq()}@demo.invalid`;
-    const inv = json(await owner.post('/api/staff/invitations', { email, fullName: 'DEMO Admin Kasir', role: 'admin', handlesFinance: true }));
-    const accept = await env.app.inject({ method: 'POST', url: '/api/auth/accept-invitation', payload: { token: tokenFrom(inv.url), password: 'SandiBaruAman#1' } });
+    const username = testUsername('ak');
+    const inv = json(await owner.post('/api/staff/invitations', { phone: testPhone(), fullName: 'DEMO Admin Kasir', role: 'admin', handlesFinance: true }));
+    const accept = await env.app.inject({ method: 'POST', url: '/api/auth/accept-invitation', payload: { token: tokenFrom(inv.url), username, password: 'SandiBaruAman#1' } });
     expect(accept.statusCode).toBe(200);
-    const staff = await login(env.app, email, 'SandiBaruAman#1');
+    const staff = await login(env.app, username, 'SandiBaruAman#1');
     const me = json(await staff.get('/api/auth/me'));
     expect(me.membership).toMatchObject({ role: 'admin', handlesFinance: true, roleLabel: 'Admin & Keuangan' });
     expect(me.permissions).toContain('payment.record');
 
     // Undangan admin biasa tidak dapat dipakai untuk membuat keanggotaan berakses keuangan.
-    const plain = json(await owner.post('/api/staff/invitations', { email: `ab.${uniq()}@demo.invalid`, fullName: 'DEMO Admin Biasa', role: 'admin' }));
+    const plain = json(await owner.post('/api/staff/invitations', { phone: testPhone(), fullName: 'DEMO Admin Biasa', role: 'admin' }));
     const u = await createUser(env.adminPool, 'sisipan');
     const insert = (handlesFinance: boolean) =>
       withTx(env.appPool, { settings: { 'app.mode': 'auth', 'app.token_hash': sha256Hex(tokenFrom(plain.url)) } }, (db) =>

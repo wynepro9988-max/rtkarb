@@ -36,7 +36,8 @@ Kode otorisasi, RLS, dan skema sama persis di kedua varian.
 ## 2. Model tenant & identitas
 
 - `organizations`: ID UUID permanen yang dibuat sekali melalui CLI. Nama bukan kunci.
-- `users`: identitas global. Email unik dan disimpan dalam huruf kecil.
+- `users`: identitas global. Login memakai **username** (unik lintas organisasi, huruf kecil). Email
+  boleh kosong dan hanya dipakai akun lama; setiap akun wajib punya salah satunya.
 - `memberships`: menghubungkan `user`, `organization`, `role`, dan `status`.
   **Satu pengguna hanya pada satu organisasi** (constraint `UNIQUE (user_id)`), sesuai
   ruang lingkup awal: tidak ada pemindahan terapis lintas organisasi.
@@ -127,7 +128,8 @@ Hak role `rtka_app` dibatasi lebih jauh:
 
 ## 6. Role & matriks permission
 
-Role tetap: **owner**, **admin** (koordinator), **terapis**, dan **keuangan** (kasir).
+Role tetap: **owner**, **admin** (koordinator), **terapis**, dan **keuangan** (kasir). Peran **wali**
+(orang tua) bukan staf dan tidak ada di matriks ini; lihat catatan di bawah.
 Admin teknis platform berada di luar tenant.
 
 | Kemampuan | Owner | Admin | Terapis | Keuangan |
@@ -136,6 +138,7 @@ Admin teknis platform berada di luar tenant.
 | Kelola staf (undang, ubah peran, nonaktifkan, tautan reset) | ✓ | lihat | – | – |
 | Data pasien & wali | ✓ | ✓ | hanya pasien yang ditugaskan | lihat (administratif) |
 | Penugasan terapis ke pasien | ✓ | ✓ | – | – |
+| Undang orang tua, cabut akses, tautan reset orang tua | ✓ | ✓ | – | – |
 | Jadwal: lihat | semua | semua | sesi sendiri | semua |
 | Jadwal: buat / jadwal ulang / batalkan | ✓ | ✓ | – | – |
 | Tandai sesi selesai / tidak hadir | ✓ | ✓ | sesi sendiri | – |
@@ -164,6 +167,14 @@ Batas diskonnya sama dengan kasir. Catatan klinis, pembatalan transaksi, pengatu
 dan pengelolaan staf tetap tertutup. Pilihan ini berlaku per admin di organisasi owner
 tersebut saja. Database menolak kombinasi peran selain admin dengan rangkap keuangan, dan
 aktivasi undangan harus sama persis dengan undangan (kebijakan RLS `memberships_insert`).
+
+**Orang tua / wali (keputusan 1 Nov 2026):** akun berperan `wali`, berasal dari undangan admin atau
+owner pada baris wali di halaman pasien (`guardians.member_id`, migrasi `009`). Sesinya bermode
+`portal`: `needTenant` selalu menolak, jadi tidak ada rute staf yang terbuka. Datanya hanya
+`GET /portal` dan `GET /portal/notes`, dalam transaksi READ ONLY, dan RLS hanya membuka anak yang
+terhubung ke akun itu: jadwal, paket, invoice, catatan terapi **final**, serta pembayaran dan refund
+untuk menghitung sisa tagihan. Draf catatan, riwayat revisi, dokumen, program terapi, dan audit log
+tertutup di kedua lapisan (keputusan K8). Pembacaan catatan dicatat sebagai `catatan.dilihat_wali`.
 
 Matriks ini didefinisikan di `server/src/authz/permissions.ts` (`permissionsForMember`).
 Pilihan yang masih berupa default tercatat di [06-keputusan-terbuka.md](06-keputusan-terbuka.md).

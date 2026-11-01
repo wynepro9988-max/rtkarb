@@ -17,7 +17,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-[ -f "$ROOT/.env" ] && set -a && . "$ROOT/.env" && set +a
+# .env hanya dipakai bila alamat belum diberikan, agar backup produksi tidak diam-diam menjadi
+# backup database lokal di komputer operator.
+if [ -z "${DATABASE_ADMIN_URL:-}" ] && [ -f "$ROOT/.env" ]; then
+  set -a; . "$ROOT/.env"; set +a
+fi
 : "${DATABASE_ADMIN_URL:?DATABASE_ADMIN_URL belum diisi}"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"

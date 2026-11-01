@@ -316,6 +316,15 @@ a.daybar-block:hover { box-shadow: inset 0 0 0 1px var(--c-sky); }
 .note-section:last-child { border-bottom: none; }
 .note-section h4 { font-size: 0.875rem; color: var(--c-primary-strong); margin-bottom: 4px; }
 .note-section p { white-space: pre-wrap; }
+.note-read { display: flex; flex-direction: column; gap: 14px; margin: 0; }
+.note-read dt { color: var(--c-muted); font-weight: 600; font-size: 0.875rem; margin-bottom: 2px; }
+.note-read dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.guardian-main { flex: 1 1 240px; min-width: 0; }
+.guardian-account { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.portal-row { border-bottom: 1px solid var(--c-border); }
+.portal-row:last-child { border-bottom: 0; }
+
 .kv { display: grid; grid-template-columns: 160px 1fr; gap: 8px 16px; font-size: 0.95rem; }
 .kv dt { color: var(--c-muted); font-weight: 600; }
 .kv dd { margin: 0; }

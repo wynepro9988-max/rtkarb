@@ -90,7 +90,8 @@ export function NoteEditorPage() {
         }
       />
       <div className="alert info" style={{ marginBottom: 16 }}>
-        Catatan klinis bersifat rahasia dan hanya dapat dilihat oleh terapis yang ditugaskan serta owner. Tulis fakta pengamatan, bukan diagnosis otomatis.
+        Catatan klinis bersifat rahasia dan hanya dapat dilihat oleh terapis yang ditugaskan serta owner. <strong>Catatan final juga dapat dibaca orang tua/wali</strong> di dasbor orang tua; draf tidak.{' '}
+        Tulis dengan bahasa yang dapat dipahami orang tua. Tulis fakta pengamatan, bukan diagnosis otomatis.
       </div>
 
       {editable ? (

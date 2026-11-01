@@ -7,6 +7,7 @@ import type { Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { idParam, likePattern, parse, zDate, zOptText, zPaging, zText } from '../http.ts';
 import { nextCounter } from '../lib/counters.ts';
+import { closeGuardianAccountIfUnlinked, GUARDIAN_ACCOUNT_FIELDS } from './guardian-accounts.ts';
 
 const guardianBody = z.object({
   fullName: zText(2, 150),
@@ -142,8 +143,10 @@ export async function patientRoutes(app: FastifyInstance) {
       const patient = await db.maybe(`SELECT ${PATIENT_FIELDS} FROM patients p WHERE p.organization_id = $1 AND p.id = $2`, [ctx.orgId, id]);
       if (!patient) throw notFound('Pasien');
       const guardians = await db.many(
-        `SELECT id, full_name, relationship, phone, email, address, is_primary, wa_opt_out
-           FROM guardians WHERE organization_id = $1 AND patient_id = $2 ORDER BY is_primary DESC, created_at`,
+        `SELECT g.id, g.full_name, g.relationship, g.phone, g.email, g.address, g.is_primary, g.wa_opt_out ${
+          can(ctx, 'guardian.invite') ? `, ${GUARDIAN_ACCOUNT_FIELDS}` : ''
+        }
+           FROM guardians g WHERE g.organization_id = $1 AND g.patient_id = $2 ORDER BY g.is_primary DESC, g.created_at`,
         [ctx.orgId, id],
       );
       const therapists = await db.many(
@@ -222,8 +225,12 @@ export async function patientRoutes(app: FastifyInstance) {
     const ctx = needTenant(req, 'patient.manage');
     const id = idParam(req.params);
     await tenantTx(app, ctx, async (db) => {
-      const g = await db.maybe<{ patientId: string }>(`DELETE FROM guardians WHERE organization_id = $1 AND id = $2 RETURNING patient_id`, [ctx.orgId, id]);
+      const g = await db.maybe<{ patientId: string; memberId: string | null }>(
+        `DELETE FROM guardians WHERE organization_id = $1 AND id = $2 RETURNING patient_id, member_id`,
+        [ctx.orgId, id],
+      );
       if (!g) throw notFound('Wali');
+      if (g.memberId) await closeGuardianAccountIfUnlinked(db, ctx.orgId!, g.memberId, ctx.userId);
       await audit(db, req, ctx, { action: 'wali.dihapus', entityType: 'patient', entityId: g.patientId, meta: { wali_id: id } });
     });
     return { ok: true };

@@ -29,7 +29,7 @@ afterAll(async () => {
 describe('Log aplikasi tidak memuat data sensitif', () => {
   it('pencarian pasien, isi catatan, kata sandi, cookie, dan nilai error database tidak tercatat', async () => {
     // Kata sandi pada login gagal.
-    await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: A.owner.email, password: 'SandiRahasiaLogUji' }, headers: { origin: ORIGIN } });
+    await app.inject({ method: 'POST', url: '/api/auth/login', payload: { identifier: A.owner.email, password: 'SandiRahasiaLogUji' }, headers: { origin: ORIGIN } });
 
     const owner = await login(app, A.owner.email);
     const therapist = await login(app, A.therapist.email);
