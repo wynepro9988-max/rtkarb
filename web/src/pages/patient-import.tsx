@@ -6,7 +6,7 @@ import { Badge, Dialog, ErrorBox, Icon, Loading, useToast } from '../ui.tsx';
 // Impor pasien dari Excel/CSV berformat bebas. Server membaca berkas dan menebak kolomnya;
 // di sini pengguna memeriksa/mengoreksi pemetaan kolom dan memilih baris sebelum menyimpan.
 
-type ImportField = { key: string; label: string; multi: boolean };
+type ImportField = { key: string; label: string; multi: boolean; group: 'anak' | 'pemeriksaan' | 'wali' };
 type Column = { index: number; letter: string; label: string; samples: string[]; field: string | null };
 type Guardian = { fullName: string; relationship: string; phone: string | null; email: string | null; isPrimary: boolean };
 type RowStatus = 'siap' | 'duplikat' | 'dilewati';
@@ -14,7 +14,16 @@ type Row = {
   row: number;
   status: RowStatus;
   issues: string[];
-  patient: { fullName: string; nickname: string | null; birthDate: string | null; sex: 'L' | 'P' | null; status: string; guardians: Guardian[] };
+  patient: {
+    fullName: string;
+    nickname: string | null;
+    birthPlace: string | null;
+    birthDate: string | null;
+    sex: 'L' | 'P' | null;
+    status: string;
+    guardians: Guardian[];
+    intake: { complaint: string | null; findings: string | null; programNotes: string | null } | null;
+  };
 };
 type Preview = {
   fields: ImportField[];
@@ -34,7 +43,11 @@ const FILTERS: Record<RowStatus, { label: string; hint: string }> = {
   dilewati: { label: 'Tidak dapat diimpor', hint: 'Baris ini dilewati. Perbaiki di berkas lalu unggah ulang bila perlu.' },
 };
 const PAGE = 100;
-const isGuardianField = (key: string) => /^(guardian|mother|father)/.test(key);
+const GROUPS = [
+  { key: 'anak', label: 'Data anak' },
+  { key: 'pemeriksaan', label: 'Pemeriksaan awal' },
+  { key: 'wali', label: 'Orang tua / wali' },
+] as const;
 
 export function PatientImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const toast = useToast();
@@ -139,8 +152,6 @@ export function PatientImportDialog({ onClose, onDone }: { onClose: () => void; 
   }
 
   const rows = preview ? preview.rows.filter((r) => r.status === filter) : [];
-  const childFields = preview?.fields.filter((f) => !isGuardianField(f.key)) ?? [];
-  const guardianFields = preview?.fields.filter((f) => isGuardianField(f.key)) ?? [];
 
   return (
     <Dialog title="Impor data pasien" onClose={onClose} wide="xl">
@@ -241,20 +252,18 @@ export function PatientImportDialog({ onClose, onDone }: { onClose: () => void; 
                       aria-label={`Kolom ${c.letter}${c.label ? ` (${c.label})` : ''} diimpor sebagai`}
                     >
                       <option value="">Tidak diimpor</option>
-                      <optgroup label="Data anak">
-                        {childFields.map((f) => (
-                          <option key={f.key} value={f.key}>
-                            {f.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Orang tua / wali">
-                        {guardianFields.map((f) => (
-                          <option key={f.key} value={f.key}>
-                            {f.label}
-                          </option>
-                        ))}
-                      </optgroup>
+                      {GROUPS.map((g) => {
+                        const fields = preview.fields.filter((f) => f.group === g.key);
+                        return fields.length ? (
+                          <optgroup key={g.key} label={g.label}>
+                            {fields.map((f) => (
+                              <option key={f.key} value={f.key}>
+                                {f.label}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : null;
+                      })}
                     </select>
                   </div>
                 ))}
@@ -368,6 +377,7 @@ function ImportRow({ r, selectable, checked, onToggle }: { r: Row; selectable: b
       <td data-label="Anak">
         <strong>{p.fullName || '—'}</strong>
         {p.nickname ? <span className="muted"> ({p.nickname})</span> : null}
+        {p.intake?.complaint ? <div className="small muted">Keluhan: {p.intake.complaint.length > 80 ? `${p.intake.complaint.slice(0, 80)}…` : p.intake.complaint}</div> : null}
         {p.status !== 'aktif' ? (
           <div>
             <Badge tone={PATIENT_STATUS[p.status]?.tone}>{PATIENT_STATUS[p.status]?.label}</Badge>
@@ -375,6 +385,7 @@ function ImportRow({ r, selectable, checked, onToggle }: { r: Row; selectable: b
         ) : null}
       </td>
       <td data-label="Lahir">
+        {p.birthPlace ? `${p.birthPlace}, ` : ''}
         {p.birthDate ? formatDate(p.birthDate) : '—'}
         {p.sex ? <div className="small muted">{p.sex === 'L' ? 'Laki-laki' : 'Perempuan'}</div> : null}
       </td>

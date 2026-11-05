@@ -34,7 +34,6 @@ export function PatientsPage() {
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
   const [status, setStatus] = useState('aktif');
-  const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setDebounced(q.trim()), 300);
@@ -54,9 +53,9 @@ export function PatientsPage() {
               <button className="btn btn-secondary" onClick={() => setImporting(true)}>
                 <Icon name="upload" /> Impor Excel
               </button>
-              <button className="btn" onClick={() => setCreating(true)}>
+              <Link className="btn" to="/pendaftaran">
                 <Icon name="plus" /> Pasien baru
-              </button>
+              </Link>
             </>
           ) : null
         }
@@ -65,7 +64,7 @@ export function PatientsPage() {
         <div className="card-head">
           <div className="search" style={{ flex: '1 1 280px' }}>
             <Icon name="search" />
-            <input className="input" placeholder="Cari nama, panggilan, atau kode pasien" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Cari pasien" />
+            <input className="input" placeholder="Cari No. RM, nama, atau panggilan" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Cari pasien" />
           </div>
           <select className="select" style={{ width: 'auto' }} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status pasien">
             <option value="">Semua status</option>
@@ -82,7 +81,7 @@ export function PatientsPage() {
             <table className="table responsive">
               <thead>
                 <tr>
-                  <th>Kode</th>
+                  <th>No. RM</th>
                   <th>Nama</th>
                   <th>Usia</th>
                   <th>Wali utama</th>
@@ -92,7 +91,7 @@ export function PatientsPage() {
               <tbody>
                 {data.items.map((p) => (
                   <tr key={p.id} className="clickable" onClick={() => navigate(`/pasien/${p.id}`)}>
-                    <td data-label="Kode" className="mono">
+                    <td data-label="No. RM" className="mono">
                       {p.patientCode}
                     </td>
                     <td data-label="Nama">
@@ -100,6 +99,11 @@ export function PatientsPage() {
                         <strong>{p.fullName}</strong>
                       </Link>
                       {p.nickname ? <span className="muted"> ({p.nickname})</span> : null}
+                      {p.hasConsent === false ? (
+                        <div>
+                          <Badge tone="warn">Belum ada informed consent</Badge>
+                        </div>
+                      ) : null}
                     </td>
                     <td data-label="Usia">{ageLabel(p.birthDate, today)}</td>
                     <td data-label="Wali utama">{p.guardianName ?? '—'}</td>
@@ -114,13 +118,12 @@ export function PatientsPage() {
         ) : null}
         {data && data.total > data.items.length ? <p className="small muted card-body">Menampilkan {data.items.length} dari {data.total}. Persempit pencarian.</p> : null}
       </div>
-      {creating ? <PatientDialog onClose={() => setCreating(false)} onSaved={(id) => navigate(`/pasien/${id}`)} /> : null}
       {importing ? <PatientImportDialog onClose={() => setImporting(false)} onDone={() => void reload()} /> : null}
     </>
   );
 }
 
-const emptyPatient = { fullName: '', nickname: '', birthDate: '', sex: '', registeredOn: '', address: '', adminNotes: '', status: 'aktif' };
+const emptyPatient = { fullName: '', nickname: '', birthPlace: '', birthDate: '', sex: '', registeredOn: '', address: '', adminNotes: '', status: 'aktif' };
 
 function PatientDialog({ initial, onClose, onSaved }: { initial?: any; onClose: () => void; onSaved: (id: string) => void }) {
   const editing = Boolean(initial);
@@ -134,6 +137,7 @@ function PatientDialog({ initial, onClose, onSaved }: { initial?: any; onClose: 
       const body: Record<string, unknown> = {
         fullName: f.fullName,
         nickname: f.nickname || null,
+        birthPlace: f.birthPlace || null,
         birthDate: f.birthDate || null,
         sex: f.sex || null,
         address: f.address || null,
@@ -164,6 +168,7 @@ function PatientDialog({ initial, onClose, onSaved }: { initial?: any; onClose: 
             {(id) => <input id={id} className="input" value={f.fullName} onChange={set('fullName')} required minLength={2} maxLength={150} />}
           </Field>
           <Field label="Nama panggilan">{(id) => <input id={id} className="input" value={f.nickname} onChange={set('nickname')} maxLength={60} />}</Field>
+          <Field label="Tempat lahir">{(id) => <input id={id} className="input" value={f.birthPlace} onChange={set('birthPlace')} maxLength={100} />}</Field>
           <Field label="Tanggal lahir">{(id) => <input id={id} className="input" type="date" value={f.birthDate} onChange={set('birthDate')} />}</Field>
           <Field label="Jenis kelamin">
             {(id) => (
@@ -265,7 +270,7 @@ export function PatientDetailPage() {
             {p.fullName} <Badge tone={PATIENT_STATUS[p.status]?.tone}>{PATIENT_STATUS[p.status]?.label}</Badge>
           </span>
         }
-        subtitle={`${p.patientCode} · ${ageLabel(p.birthDate, today)}${p.nickname ? ` · dipanggil "${p.nickname}"` : ''}`}
+        subtitle={`No. RM ${p.patientCode} · ${ageLabel(p.birthDate, today)}${p.nickname ? ` · dipanggil "${p.nickname}"` : ''}`}
         actions={
           can('patient.manage') ? (
             <button className="btn btn-secondary" onClick={() => setEditing(true)}>
@@ -274,6 +279,7 @@ export function PatientDetailPage() {
           ) : null
         }
       />
+      {p.hasConsent === false ? <ConsentMissing patient={p} reload={reload} /> : null}
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'profil' ? <ProfileTab patient={p} reload={reload} /> : null}
       {tab === 'jadwal' ? <AppointmentsTab patient={p} /> : null}
@@ -284,6 +290,134 @@ export function PatientDetailPage() {
       {tab === 'dokumen' ? <DocumentsTab patient={p} /> : null}
       {editing ? <PatientDialog initial={p} onClose={() => setEditing(false)} onSaved={() => reload()} /> : null}
     </>
+  );
+}
+
+// Pemeriksaan awal & program terapi: owner, admin, dan terapis yang menangani anak.
+function IntakeSection({ patient: p, reload }: { patient: any; reload: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const i = p.intake;
+  return (
+    <div className="intake">
+      <div className="spread">
+        <h3>Pemeriksaan awal & program</h3>
+        <button className="btn btn-sm btn-ghost" onClick={() => setEditing(true)}>
+          {i ? 'Ubah' : 'Isi'}
+        </button>
+      </div>
+      {i ? (
+        <dl className="note-read">
+          <div>
+            <dt>Keluhan awal</dt>
+            <dd>{i.complaint ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>Hasil pemeriksaan</dt>
+            <dd>{i.findings ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>Program terapi</dt>
+            <dd>
+              {i.programServices?.length ? <strong>{i.programServices.join(' + ')}</strong> : '—'}
+              {i.programNotes ? <div>{i.programNotes}</div> : null}
+            </dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="small muted">Belum diisi.</p>
+      )}
+      {editing ? <IntakeDialog patient={p} onClose={() => setEditing(false)} onSaved={reload} /> : null}
+    </div>
+  );
+}
+
+function IntakeDialog({ patient: p, onClose, onSaved }: { patient: any; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const { data: services } = useApi<any[]>('/services');
+  const [f, setF] = useState({ complaint: p.intake?.complaint ?? '', findings: p.intake?.findings ?? '', programNotes: p.intake?.programNotes ?? '' });
+  const [program, setProgram] = useState<string[]>(p.intake?.programServiceIds ?? []);
+  const { busy, error, submit } = useSubmit(
+    () => put(`/patients/${p.id}/intake`, { complaint: f.complaint || null, findings: f.findings || null, programNotes: f.programNotes || null, programServiceIds: program }),
+    () => {
+      toast('Pemeriksaan awal disimpan');
+      onSaved();
+      onClose();
+    },
+  );
+  return (
+    <Dialog title="Pemeriksaan awal & program terapi" onClose={onClose} wide>
+      <form className="form" onSubmit={submit}>
+        <Field label="Keluhan awal">
+          {(id) => <textarea id={id} className="textarea" style={{ minHeight: 72 }} value={f.complaint} onChange={(e) => setF({ ...f, complaint: e.target.value })} maxLength={5000} />}
+        </Field>
+        <Field label="Hasil pemeriksaan">
+          {(id) => <textarea id={id} className="textarea" value={f.findings} onChange={(e) => setF({ ...f, findings: e.target.value })} maxLength={10000} />}
+        </Field>
+        <div className="field">
+          <span className="label">Program terapi</span>
+          <div className="chips" role="group" aria-label="Program terapi">
+            {(services ?? [])
+              .filter((s) => s.active || program.includes(s.id))
+              .map((s) => {
+                const on = program.includes(s.id);
+                return (
+                  <button key={s.id} type="button" className={`chip${on ? ' on' : ''}`} aria-pressed={on} onClick={() => setProgram(on ? program.filter((x) => x !== s.id) : [...program, s.id])}>
+                    {s.name}
+                  </button>
+                );
+              })}
+          </div>
+        </div>
+        <Field label="Uraian program">
+          {(id) => <textarea id={id} className="textarea" style={{ minHeight: 72 }} value={f.programNotes} onChange={(e) => setF({ ...f, programNotes: e.target.value })} maxLength={5000} />}
+        </Field>
+        <ErrorBox error={error} />
+        <div className="form-actions">
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            Batal
+          </button>
+          <button className="btn" disabled={busy}>
+            {busy ? 'Menyimpan…' : 'Simpan'}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+// Pasien tanpa foto informed consent (mis. hasil impor): ingatkan dan sediakan unggahan langsung.
+function ConsentMissing({ patient: p, reload }: { patient: any; reload: () => void }) {
+  const { can } = useAuth();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    const form = new FormData();
+    form.set('title', 'Foto informed consent');
+    form.set('category', 'administrasi');
+    form.set('docType', 'informed_consent');
+    form.set('file', file);
+    setBusy(true);
+    try {
+      await api(`/patients/${p.id}/documents`, { method: 'POST', form });
+      toast('Informed consent tersimpan');
+      reload();
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="alert warn spread" style={{ marginBottom: 16 }}>
+      <span>Foto informed consent pasien ini belum ada.</span>
+      {can('document.upload') ? (
+        <label className="btn btn-sm btn-secondary">
+          {busy ? 'Mengunggah…' : 'Unggah informed consent'}
+          <input className="sr-only" type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" disabled={busy} onChange={(e) => void upload(e.target.files?.[0])} />
+        </label>
+      ) : null}
+    </div>
   );
 }
 
@@ -373,10 +507,10 @@ function ProfileTab({ patient: p, reload }: { patient: any; reload: () => void }
       <section className="card card-pad">
         <h2 style={{ marginBottom: 12 }}>Data administrasi</h2>
         <dl className="kv">
-          <dt>Kode pasien</dt>
+          <dt>No. RM</dt>
           <dd className="mono">{p.patientCode}</dd>
-          <dt>Tanggal lahir</dt>
-          <dd>{formatDate(p.birthDate)}</dd>
+          <dt>Tempat, tanggal lahir</dt>
+          <dd>{[p.birthPlace, p.birthDate ? formatDate(p.birthDate) : null].filter(Boolean).join(', ') || '—'}</dd>
           <dt>Jenis kelamin</dt>
           <dd>{p.sex === 'L' ? 'Laki-laki' : p.sex === 'P' ? 'Perempuan' : '—'}</dd>
           <dt>Terdaftar</dt>
@@ -386,6 +520,7 @@ function ProfileTab({ patient: p, reload }: { patient: any; reload: () => void }
           <dt>Catatan admin</dt>
           <dd style={{ whiteSpace: 'pre-wrap' }}>{p.adminNotes ?? '—'}</dd>
         </dl>
+        {p.intake !== undefined ? <IntakeSection patient={p} reload={reload} /> : null}
       </section>
       <div className="stack">
         <section className="card">

@@ -10,11 +10,15 @@ export const IMPORT_FIELDS = {
   fullName: 'Nama lengkap anak',
   nickname: 'Nama panggilan',
   birthDate: 'Tanggal lahir',
+  birthPlace: 'Tempat lahir',
   sex: 'Jenis kelamin',
   registeredOn: 'Tanggal pendaftaran',
   status: 'Status pasien',
   address: 'Alamat',
   notes: 'Catatan administrasi',
+  complaint: 'Keluhan awal',
+  findings: 'Hasil pemeriksaan / diagnosa',
+  programNotes: 'Program terapi',
   guardianName: 'Nama orang tua/wali',
   guardianRelationship: 'Hubungan wali',
   guardianPhone: 'No. HP/WA orang tua/wali',
@@ -28,6 +32,9 @@ export type ImportField = keyof typeof IMPORT_FIELDS;
 export const FIELD_KEYS = Object.keys(IMPORT_FIELDS) as ImportField[];
 // Isian yang boleh diisi lebih dari satu kolom (isinya digabung).
 export const MULTI_FIELDS = new Set<ImportField>(['notes']);
+// Data pemeriksaan awal (tabel patient_intakes): hanya untuk pengguna dengan hak patient.intake.
+export const INTAKE_FIELDS = new Set<ImportField>(['complaint', 'findings', 'programNotes']);
+export const fieldGroup = (f: ImportField) => (INTAKE_FIELDS.has(f) ? 'pemeriksaan' : /^(guardian|mother|father)/.test(f) ? 'wali' : 'anak');
 
 export const MAX_IMPORT_ROWS = 2000;
 
@@ -53,7 +60,7 @@ const ADDRESS = ['alamat', 'domisili', 'address', 'tinggal'];
 // Kata yang menandakan judul kolom tentang hal lain, bukan nama anak.
 const OTHER_ENTITY = ['sekolah', 'terapis', 'dokter', 'guru', 'kelas', 'instansi', 'klinik', 'rs', 'kantor', 'perusahaan', 'pengantar', 'pendaftar', 'admin', 'petugas', 'file', 'paket', 'layanan', 'program', 'terapi', 'kota', 'desa', 'jalan', 'kelurahan', 'kecamatan', 'kabupaten', 'provinsi', 'bank', 'rekening', 'akun', 'user', 'pengguna', 'saudara', 'kakak', 'adik', 'pasangan', 'suami', 'istri', 'dokumen', 'obat', 'cabang', 'unit', 'panggilan', 'kecil'];
 // Judul yang jelas judul kolom tetapi tidak diimpor otomatis (dapat dipilih manual sebagai catatan).
-const KNOWN_OTHER = ['no', 'nomor', 'nomer', 'urut', 'usia', 'umur', 'diagnosa', 'diagnosis', 'keluhan', 'sekolah', 'kelas', 'agama', 'pekerjaan', 'pendidikan', 'terapis', 'jadwal', 'hari', 'jam', 'program', 'layanan', 'paket', 'biaya', 'tarif', 'nik', 'kk', 'berat', 'tinggi', 'kota', 'kecamatan', 'kelurahan', 'provinsi', 'rujukan', 'dokter', 'sumber', 'tahun', 'bulan', 'tempat', 'kategori', 'jenis', 'kebutuhan', 'hobi', 'alergi', 'riwayat', 'tanggal', 'tgl', 'total', 'jumlah', 'id', 'foto', 'terapi', 'tindakan', 'kondisi'];
+const KNOWN_OTHER = ['no', 'nomor', 'nomer', 'urut', 'usia', 'umur', 'sekolah', 'kelas', 'agama', 'pekerjaan', 'pendidikan', 'terapis', 'jadwal', 'hari', 'jam', 'layanan', 'paket', 'biaya', 'tarif', 'nik', 'kk', 'berat', 'tinggi', 'kota', 'kecamatan', 'kelurahan', 'provinsi', 'rujukan', 'dokter', 'sumber', 'tahun', 'bulan', 'tempat', 'kategori', 'jenis', 'kebutuhan', 'hobi', 'alergi', 'riwayat', 'tanggal', 'tgl', 'total', 'jumlah', 'id', 'foto', 'terapi', 'tindakan', 'kondisi'];
 
 const has = (t: string[], words: string[]) => t.some((w) => words.includes(w));
 const hasPhrase = (t: string[], a: string, b: string) => t.some((w, i) => w === a && t[i + 1] === b);
@@ -75,8 +82,14 @@ export function headerField(label: string): ImportField | 'lain' | null {
     return 'guardianName';
   }
   if (has(t, ['hubungan', 'relasi'])) return 'guardianRelationship';
+  // Formulir Google: kolom "Timestamp" / "Cap waktu" = waktu pendaftaran.
+  if (has(t, ['timestamp']) || hasPhrase(t, 'cap', 'waktu')) return 'registeredOn';
+  if (has(t, ['keluhan'])) return 'complaint';
+  if (has(t, ['diagnosa', 'diagnosis']) || (has(t, ['hasil']) && has(t, ['pemeriksaan', 'asesmen', 'assesment', 'assessment', 'observasi', 'evaluasi']))) return 'findings';
+  if (has(t, ['program']) && !has(t, ['studi'])) return 'programNotes';
   if (has(t, ['lahir', 'kelahiran'])) {
-    if (has(t, ['tahun', 'bulan']) || (has(t, ['tempat']) && !has(t, ['tanggal', 'tgl', 'tanggal']))) return 'lain';
+    if (has(t, ['tahun', 'bulan'])) return 'lain';
+    if (has(t, ['tempat']) && !has(t, ['tanggal', 'tgl'])) return 'birthPlace';
     return 'birthDate';
   }
   if (has(t, ['ttl', 'dob', 'birth', 'birthday', 'birthdate'])) return 'birthDate';
@@ -133,22 +146,35 @@ function fullYear(s: string): number {
 // Bentuk angka dibaca tanggal/bulan/tahun (kebiasaan Indonesia) kecuali monthFirst.
 // loose: tanggal boleh berada di dalam teks lain (mis. "Surakarta, 12 Maret 2019").
 export function parseDate(raw: string, opts: { monthFirst?: boolean; loose?: boolean } = {}): string | null {
+  return matchDate(raw, opts)?.iso ?? null;
+}
+
+// Seperti parseDate, ditambah posisi awal tanggal di teks (untuk memisahkan tempat lahir dari TTL).
+function matchDate(raw: string, opts: { monthFirst?: boolean; loose?: boolean } = {}): { iso: string | null; index: number } | null {
   const s = raw.trim().toLowerCase();
   if (!s) return null;
   const wrap = (core: string) => new RegExp(opts.loose ? `(?<![\\d])${core}(?![\\d])` : `^${core}(?:[ t]\\d{1,2}[:.]\\d{2}(?:[:.]\\d{2})?)?$`);
   let m = wrap('(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})').exec(s);
-  if (m) return ymd(+m[1], +m[2], +m[3]);
+  if (m) return { iso: ymd(+m[1], +m[2], +m[3]), index: m.index };
   m = wrap('(\\d{1,2})[-/.](\\d{1,2})[-/.](\\d{4}|\\d{2})').exec(s);
   if (m) {
     let [d, mo] = [+m[1], +m[2]];
     if (opts.monthFirst || (d <= 12 && mo > 12)) [d, mo] = [mo, d];
-    return ymd(fullYear(m[3]), mo, d);
+    return { iso: ymd(fullYear(m[3]), mo, d), index: m.index };
   }
   m = wrap('(\\d{1,2})[\\s\\-./]*([a-z]{3,9})\\.?[\\s\\-./,]*(\\d{4}|\\d{2})').exec(s);
-  if (m && MONTHS[m[2]]) return ymd(fullYear(m[3]), MONTHS[m[2]], +m[1]);
+  if (m && MONTHS[m[2]]) return { iso: ymd(fullYear(m[3]), MONTHS[m[2]], +m[1]), index: m.index };
   m = wrap('([a-z]{3,9})\\.?\\s+(\\d{1,2}),?\\s+(\\d{4})').exec(s);
-  if (m && MONTHS[m[1]]) return ymd(+m[3], MONTHS[m[1]], +m[2]);
+  if (m && MONTHS[m[1]]) return { iso: ymd(+m[3], MONTHS[m[1]], +m[2]), index: m.index };
   return null;
+}
+
+// "Surakarta, 12 Maret 2019" -> "Surakarta". Null bila tidak ada teks tempat sebelum tanggal.
+export function placeFromTtl(raw: string): string | null {
+  const m = matchDate(raw, { loose: true });
+  if (!m || !m.index) return null;
+  const place = raw.trim().slice(0, m.index).replace(/[\s,.;:/-]+$/, '').trim();
+  return /\p{L}{2}/u.test(place) ? place.slice(0, 100) : null;
 }
 
 // Nomor seri tanggal Excel (sel tanggal yang tersimpan sebagai angka biasa, mis. dari CSV).
@@ -380,6 +406,7 @@ export interface GuardianDraft {
 export interface PatientDraft {
   fullName: string;
   nickname: string | null;
+  birthPlace: string | null;
   birthDate: string | null;
   sex: 'L' | 'P' | null;
   registeredOn: string | null;
@@ -387,6 +414,8 @@ export interface PatientDraft {
   address: string | null;
   adminNotes: string | null;
   guardians: GuardianDraft[];
+  // Pemeriksaan awal (null bila kosong).
+  intake: { complaint: string | null; findings: string | null; programNotes: string | null } | null;
 }
 
 export type RowStatus = 'siap' | 'duplikat' | 'dilewati';
@@ -525,9 +554,16 @@ export function prepareRows(
 
     const nickname = get('nickname');
     const address = get('address');
+    // Tempat lahir: kolom tersendiri, atau teks sebelum tanggal pada kolom TTL.
+    const ttlCol = one('birthDate');
+    const birthPlace = get('birthPlace') || (one('birthPlace') === undefined && ttlCol !== undefined ? (placeFromTtl(clean(raw[ttlCol])) ?? '') : '');
+    const complaint = get('complaint');
+    const findings = get('findings');
+    const programNotes = get('programNotes');
     const patient: PatientDraft = {
       fullName: fullName.slice(0, 150),
       nickname: nickname ? cut(nickname, 60, 'Nama panggilan', issues) : null,
+      birthPlace: birthPlace ? cut(birthPlace, 100, 'Tempat lahir', issues) : null,
       birthDate,
       sex,
       registeredOn,
@@ -535,6 +571,14 @@ export function prepareRows(
       address: address ? cut(address, 500, 'Alamat', issues) : null,
       adminNotes: notes ? cut(notes, 2000, 'Catatan', issues) : null,
       guardians: [],
+      intake:
+        complaint || findings || programNotes
+          ? {
+              complaint: complaint ? cut(complaint, 5000, 'Keluhan awal', issues) : null,
+              findings: findings ? cut(findings, 10000, 'Hasil pemeriksaan', issues) : null,
+              programNotes: programNotes ? cut(programNotes, 5000, 'Program terapi', issues) : null,
+            }
+          : null,
     };
     patient.guardians = buildGuardians(get, fullName, issues);
 

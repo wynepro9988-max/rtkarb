@@ -17,8 +17,8 @@ const SESSION_FIELDS = `a.id, a.patient_id, a.status, a.duration_minutes,
   to_char(a.starts_at AT TIME ZONE $3, 'HH24:MI') AS local_time,
   s.name AS service_name, u.full_name AS therapist_name`;
 const SESSION_JOINS = `
-  JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
-  JOIN users u ON u.id = m.user_id
+  LEFT JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
+  LEFT JOIN users u ON u.id = m.user_id
   LEFT JOIN therapy_services s ON s.organization_id = a.organization_id AND s.id = a.service_id`;
 
 export async function portalRoutes(app: FastifyInstance) {

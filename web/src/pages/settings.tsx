@@ -93,7 +93,7 @@ function OrgSettings() {
             </select>
           )}
         </Field>
-        <Field label="Awalan kode pasien" hint="Contoh: RB → RB-0001">
+        <Field label="Awalan No. RM" hint="Contoh: RB → RB-0001. Berlaku untuk pasien baru; No. RM yang sudah ada tidak berubah.">
           {(id) => <input id={id} className="input mono" value={f.patientCodePrefix} onChange={(e) => setF({ ...f, patientCodePrefix: e.target.value.toUpperCase() })} maxLength={8} required />}
         </Field>
         <Field label="Awalan nomor kuitansi" hint="Contoh: KW → KW/2026/00001">

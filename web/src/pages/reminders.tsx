@@ -106,7 +106,7 @@ export function RemindersPage() {
                   {g.patientName}, pukul {g.sessions.map((x: any) => x.localTime).join(', ')}
                 </strong>
                 <div className="small muted">
-                  {[...new Set(g.sessions.map((x: any) => x.therapistName))].join(', ')}. Wali: {g.guardianName ?? '—'}
+                  {[...new Set(g.sessions.map((x: any) => x.therapistName).filter(Boolean))].join(', ') || 'terapis belum ditentukan'}. Wali: {g.guardianName ?? '—'}
                   {g.phone ? `, +${g.phone}` : g.phoneInvalid ? ', nomor tidak valid' : ', belum ada nomor'}
                 </div>
               </div>

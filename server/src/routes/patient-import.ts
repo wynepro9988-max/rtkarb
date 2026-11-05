@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../audit.ts';
-import { needTenant, tenantTx, type AuthContext } from '../authz/context.ts';
+import { can, needTenant, tenantTx, type AuthContext } from '../authz/context.ts';
 import type { Db } from '../db.ts';
 import { badRequest, HttpError } from '../errors.ts';
 import { parse } from '../http.ts';
@@ -10,7 +10,9 @@ import {
   analyzeColumns,
   detectLayout,
   FIELD_KEYS,
+  fieldGroup,
   IMPORT_FIELDS,
+  INTAKE_FIELDS,
   MAX_IMPORT_ROWS,
   MULTI_FIELDS,
   prepareRows,
@@ -69,7 +71,7 @@ async function readUpload(req: FastifyRequest) {
 
 const hasContent = (rows: string[][]) => rows.some((r) => r.some((c) => c.trim()));
 
-function analyze(upload: Awaited<ReturnType<typeof readUpload>>, existing: ExistingPatient[], today: string) {
+function analyze(upload: Awaited<ReturnType<typeof readUpload>>, existing: ExistingPatient[], today: string, allowIntake: boolean) {
   const sheets = readSpreadsheet(upload.buf);
   const candidates = sheets.map((s, index) => ({ ...s, index })).filter((s) => hasContent(s.rows));
   if (!candidates.length) throw badRequest('Berkas tidak berisi data');
@@ -102,7 +104,7 @@ function analyze(upload: Awaited<ReturnType<typeof readUpload>>, existing: Exist
     throw badRequest(`Berkas berisi ${dataRows} baris data. Maksimal ${MAX_IMPORT_ROWS} baris sekali impor; bagi berkas menjadi beberapa bagian.`);
   }
 
-  let mapping: Mapping = result.suggested;
+  let mapping: Mapping = new Map([...result.suggested].filter(([, f]) => allowIntake || !INTAKE_FIELDS.has(f)));
   if (upload.mapping) {
     mapping = new Map();
     const known = new Set(columns.map((c) => c.index));
@@ -110,6 +112,7 @@ function analyze(upload: Awaited<ReturnType<typeof readUpload>>, existing: Exist
       if (!field) continue;
       const col = Number(key);
       if (!known.has(col)) throw badRequest('Pemetaan menyebut kolom yang tidak ada di berkas');
+      if (!allowIntake && INTAKE_FIELDS.has(field)) throw badRequest(`Anda tidak memiliki akses ke "${IMPORT_FIELDS[field]}"`);
       if (!MULTI_FIELDS.has(field) && [...mapping.values()].includes(field)) {
         throw badRequest(`"${IMPORT_FIELDS[field]}" dipilih untuk lebih dari satu kolom`);
       }
@@ -151,7 +154,11 @@ export async function patientImportRoutes(app: FastifyInstance) {
     const upload = await readUpload(req);
     return tenantTx(app, ctx, async (db) => {
       const { existing, today } = await context(db, ctx);
-      return { fields: FIELD_KEYS.map((key) => ({ key, label: IMPORT_FIELDS[key], multi: MULTI_FIELDS.has(key) })), ...analyze(upload, existing, today) };
+      const allowIntake = can(ctx, 'patient.intake');
+      return {
+        fields: FIELD_KEYS.filter((key) => allowIntake || !INTAKE_FIELDS.has(key)).map((key) => ({ key, label: IMPORT_FIELDS[key], multi: MULTI_FIELDS.has(key), group: fieldGroup(key) })),
+        ...analyze(upload, existing, today, allowIntake),
+      };
     });
   });
 
@@ -162,7 +169,7 @@ export async function patientImportRoutes(app: FastifyInstance) {
       // Satu impor per organisasi pada satu waktu, agar pemeriksaan duplikat tidak saling mendahului.
       await db.exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`patient-import:${ctx.orgId}`]);
       const { existing, today } = await context(db, ctx);
-      const analysis = analyze(upload, existing, today);
+      const analysis = analyze(upload, existing, today, can(ctx, 'patient.intake'));
       if (!analysis.hasName) throw badRequest(`Pilih kolom yang berisi ${IMPORT_FIELDS.fullName.toLowerCase()}`);
       const chosen = analysis.rows.filter(
         (r) => !upload.skip.has(r.row) && (r.status === 'siap' || (r.status === 'duplikat' && upload.includeDuplicates)),
@@ -175,11 +182,18 @@ export async function patientImportRoutes(app: FastifyInstance) {
         const seq = await nextCounter(db, ctx.orgId!, 'patient');
         const code = `${org.patientCodePrefix}-${String(seq).padStart(4, '0')}`;
         const row = await db.one<{ id: string }>(
-          `INSERT INTO patients (organization_id, patient_code, full_name, nickname, birth_date, sex, status, registered_on, address, admin_notes, created_by, updated_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, coalesce($8::date, current_date), $9, $10, $11, $11)
+          `INSERT INTO patients (organization_id, patient_code, full_name, nickname, birth_place, birth_date, sex, status, registered_on, address, admin_notes, created_by, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9::date, current_date), $10, $11, $12, $12)
            RETURNING id`,
-          [ctx.orgId, code, p.fullName, p.nickname, p.birthDate, p.sex, p.status, p.registeredOn, p.address, p.adminNotes, ctx.userId],
+          [ctx.orgId, code, p.fullName, p.nickname, p.birthPlace, p.birthDate, p.sex, p.status, p.registeredOn, p.address, p.adminNotes, ctx.userId],
         );
+        if (p.intake) {
+          await db.exec(
+            `INSERT INTO patient_intakes (organization_id, patient_id, complaint, findings, program_notes, created_by, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $6)`,
+            [ctx.orgId, row.id, p.intake.complaint, p.intake.findings, p.intake.programNotes, ctx.userId],
+          );
+        }
         for (const g of p.guardians) {
           await insertGuardian(db, ctx.orgId!, row.id, ctx.userId, { ...g, address: null, waOptOut: false });
         }

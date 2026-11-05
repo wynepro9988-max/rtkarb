@@ -15,7 +15,10 @@ import { DashboardPage } from './pages/dashboard.tsx';
 import { FinancePage, ReceiptPage } from './pages/finance.tsx';
 import { NoteEditorPage } from './pages/notes.tsx';
 import { PortalPage } from './pages/portal.tsx';
+import { AbsenPage } from './pages/absen.tsx';
 import { PatientDetailPage, PatientsPage } from './pages/patients.tsx';
+import { PublicRegistrationPage } from './pages/public-registration.tsx';
+import { RegistrationPage } from './pages/registration.tsx';
 import { PrivacyPage } from './pages/privacy.tsx';
 import { RemindersPage } from './pages/reminders.tsx';
 import { ReportsPage } from './pages/reports.tsx';
@@ -28,6 +31,7 @@ const router = createBrowserRouter([
   { path: '/masuk', element: <LoginPage /> },
   { path: '/aktivasi', element: <ActivatePage /> },
   { path: '/reset-sandi', element: <ResetPasswordPage /> },
+  { path: '/daftar/:token', element: <PublicRegistrationPage /> },
   {
     path: '/',
     element: <RequireAuth />,
@@ -35,7 +39,9 @@ const router = createBrowserRouter([
       { index: true, element: <HomeRedirect /> },
       { path: 'dasbor', element: <DashboardPage /> },
       { path: 'orang-tua', element: <PortalPage /> },
+      { path: 'absen', element: <AbsenPage /> },
       { path: 'jadwal', element: <SchedulePage /> },
+      { path: 'pendaftaran', element: <RegistrationPage /> },
       { path: 'pasien', element: <PatientsPage /> },
       { path: 'pasien/:id', element: <PatientDetailPage /> },
       { path: 'catatan/baru', element: <NoteEditorPage /> },

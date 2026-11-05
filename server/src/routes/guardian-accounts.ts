@@ -80,11 +80,14 @@ export async function guardianAccountRoutes(app: FastifyInstance) {
           WHERE organization_id = $1 AND guardian_id = $2 AND used_at IS NULL AND revoked_at IS NULL`,
         [ctx.orgId, id],
       );
+      // Orang tua masuk dengan No. RM anak: dijadikan saran username di halaman aktivasi.
+      const { patientCode } = await db.one<{ patientCode: string }>(`SELECT patient_code FROM patients WHERE organization_id = $1 AND id = $2`, [ctx.orgId, g.patientId]);
+      const suggested = patientCode.toLowerCase();
       const t = await db.one<{ id: string; expiresAt: Date }>(
-        `INSERT INTO account_tokens (organization_id, purpose, token_hash, phone, full_name, role, guardian_id, created_by, expires_at)
-         VALUES ($1, 'undangan', $2, $3, $4, 'wali', $5, $6, now() + make_interval(hours => $7))
+        `INSERT INTO account_tokens (organization_id, purpose, token_hash, phone, full_name, role, guardian_id, suggested_username, created_by, expires_at)
+         VALUES ($1, 'undangan', $2, $3, $4, 'wali', $5, $6, $7, now() + make_interval(hours => $8))
          RETURNING id, expires_at`,
-        [ctx.orgId, sha256Hex(token), phone, g.fullName, id, ctx.userId, INVITE_HOURS],
+        [ctx.orgId, sha256Hex(token), phone, g.fullName, id, /^[a-z0-9][a-z0-9._-]{2,31}$/.test(suggested) ? suggested : null, ctx.userId, INVITE_HOURS],
       );
       await audit(db, req, ctx, { action: 'wali.diundang', entityType: 'patient', entityId: g.patientId, meta: { wali_id: id, undangan_id: t.id } });
       return { linked: false as const, expiresAt: t.expiresAt, phone };

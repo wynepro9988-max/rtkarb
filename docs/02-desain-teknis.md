@@ -137,11 +137,15 @@ Admin teknis platform berada di luar tenant.
 | Dasbor organisasi | ✓ | ✓ | ✓ (milik sendiri) | ✓ |
 | Kelola staf (undang, ubah peran, nonaktifkan, tautan reset) | ✓ | lihat | – | – |
 | Data pasien & wali | ✓ | ✓ | hanya pasien yang ditugaskan | lihat (administratif) |
+| Pemeriksaan awal & program terapi | ✓ | ✓ | pasien yang ditugaskan | – |
+| Cari pasien aktif untuk absen (No. RM, nama, panggilan, usia) | ✓ | ✓ | ✓ | – |
 | Penugasan terapis ke pasien | ✓ | ✓ | – | – |
 | Undang orang tua, cabut akses, tautan reset orang tua | ✓ | ✓ | – | – |
 | Jadwal: lihat | semua | semua | sesi sendiri | semua |
 | Jadwal: buat / jadwal ulang / batalkan | ✓ | ✓ | – | – |
 | Tandai sesi selesai / tidak hadir | ✓ | ✓ | sesi sendiri | – |
+| Absen sesi (tertaut otomatis ke anak) | ✓ (pilih terapis) | ✓ (pilih terapis) | diri sendiri, wajib tulis aktivitas | – |
+| Video/foto sesi: lihat / unggah | ✓ / ✓ | – | pasien yang ditugaskan / sesi sendiri | – |
 | Koreksi status sesi (reopen) | ✓ | – | – | – |
 | Catatan terapi: baca | ✓ | – | pasien yang ditugaskan | – |
 | Catatan terapi: tulis | ✓ (bila ditugaskan) | – | ✓ (bila ditugaskan) | – |
@@ -206,8 +210,10 @@ Di layar persetujuan, cakupan ini diberi tanda merah.
 | Auth | `POST auth/login`, `GET auth/me`, `POST auth/logout`, `POST auth/logout-all`, `POST auth/change-password`, `POST auth/token-info`, `POST auth/accept-invitation`, `POST auth/reset-password` |
 | Organisasi | `GET/PATCH org`, `GET/POST services`, `PATCH services/:id`, `GET/POST package-types`, `PATCH package-types/:id` |
 | Staf | `GET staff`, `GET staff/therapists`, `GET/POST staff/invitations`, `POST staff/invitations/:id/revoke`, `PATCH staff/:id`, `POST staff/:id/deactivate`, `POST staff/:id/reactivate`, `POST staff/:id/reset-link` |
-| Pasien | `GET/POST patients`, `POST patients/import/preview` dan `POST patients/import` (multipart Excel/CSV), `GET/PATCH patients/:id`, `POST patients/:id/guardians`, `PATCH/DELETE guardians/:id`, `PUT patients/:id/therapists`, `GET patients/:id/{appointments,notes,packages,payments,documents}` |
-| Jadwal | `GET/POST appointments`, `GET appointments/:id`, `POST appointments/:id/{complete,no-show,cancel,reschedule,reopen}` |
+| Pasien | `GET/POST patients`, `PUT patients/:id/intake`, `POST patients/import/preview` dan `POST patients/import` (multipart Excel/CSV), `GET/PATCH patients/:id`, `POST patients/:id/guardians`, `PATCH/DELETE guardians/:id`, `PUT patients/:id/therapists`, `GET patients/:id/{appointments,notes,packages,payments,documents}` |
+| Jadwal | `GET/POST appointments` (terapis opsional), `GET appointments/:id`, `POST appointments/:id/{complete,no-show,cancel,reschedule,reopen}` |
+| Pendaftaran online | `GET/POST public/registration/:token` (tanpa sesi), `GET/PUT org/registration-link`, `GET registrations`, `POST registrations/:id/reject`; diterima lewat `POST patients` dengan `registrationRequestId` |
+| Absen & media | `GET absen/patients`, `GET absen/agenda`, `POST absen`, `GET/POST appointments/:id/media` (multipart), `GET media/:id` (Range), `POST media/:id/archive` |
 | Catatan | `POST notes`, `GET/PUT notes/:id`, `GET notes/:id/revisions` |
 | Paket | `POST patients/:id/packages`, `GET patient-packages/:id`, `POST patient-packages/:id/{adjust,cancel}` |
 | Keuangan | `GET/POST payments`, `GET payments/:id`, `POST payments/:id/void`, `GET finance/outstanding`, `GET/POST expenses`, `POST expenses/:id/void` |

@@ -55,7 +55,7 @@ async function operational(db: Db, ctx: AuthContext, from: string, to: string) {
     p,
   );
   const byTherapist = await db.many(
-    `SELECT u.full_name AS therapist_name,
+    `SELECT coalesce(u.full_name, 'Belum ditentukan') AS therapist_name,
             count(*) FILTER (WHERE a.status = 'selesai') AS completed,
             count(*) FILTER (WHERE a.status = 'tidak_hadir') AS no_show,
             count(*) FILTER (WHERE a.status = 'dibatalkan') AS cancelled,
@@ -68,11 +68,11 @@ async function operational(db: Db, ctx: AuthContext, from: string, to: string) {
                 : ''
             }
        FROM appointments a
-       JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
-       JOIN users u ON u.id = m.user_id
+       LEFT JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
+       LEFT JOIN users u ON u.id = m.user_id
        LEFT JOIN therapy_notes n ON n.organization_id = a.organization_id AND n.appointment_id = a.id
       WHERE a.organization_id = $1 AND a.starts_at >= ${startOf} AND a.starts_at < ${endOf}
-      GROUP BY u.full_name ORDER BY u.full_name`,
+      GROUP BY u.full_name ORDER BY u.full_name NULLS LAST`,
     p,
   );
   const byService = await db.many(
@@ -318,8 +318,8 @@ export async function reportRoutes(app: FastifyInstance) {
              FROM appointments a
              LEFT JOIN therapy_notes n ON n.organization_id = a.organization_id AND n.appointment_id = a.id
              JOIN patients p ON p.organization_id = a.organization_id AND p.id = a.patient_id
-             JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
-             JOIN users u ON u.id = m.user_id
+             LEFT JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
+             LEFT JOIN users u ON u.id = m.user_id
              LEFT JOIN therapy_services s ON s.organization_id = a.organization_id AND s.id = a.service_id
             WHERE a.organization_id = $1 AND a.starts_at >= ${startOf} AND a.starts_at < ${endOf}
             ORDER BY a.starts_at`,
@@ -331,7 +331,7 @@ export async function reportRoutes(app: FastifyInstance) {
             columns: [
               { header: 'Tanggal', width: 12 },
               { header: 'Jam', width: 8 },
-              { header: 'Kode Pasien', width: 12 },
+              { header: 'No. RM', width: 12 },
               { header: 'Nama Pasien', width: 28 },
               { header: 'Terapis', width: 24 },
               { header: 'Layanan', width: 22 },
@@ -398,7 +398,7 @@ export async function reportRoutes(app: FastifyInstance) {
             columns: [
               { header: 'Tanggal', width: 12 },
               { header: 'No. Kuitansi', width: 18 },
-              { header: 'Kode Pasien', width: 12 },
+              { header: 'No. RM', width: 12 },
               { header: 'Nama Pasien', width: 28 },
               { header: 'Metode', width: 10 },
               { header: 'Nominal (Rp)', width: 16, money: true },

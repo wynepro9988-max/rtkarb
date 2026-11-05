@@ -37,7 +37,7 @@ export interface ReminderSession {
   appointmentId: string;
   startsAt: Date;
   localTime: string;
-  therapistName: string;
+  therapistName: string | null;
   // Pengiriman manual (wa.me).
   sentAt: Date | null;
   auto: { status: string; at: Date; reason: string | null; attempts: number } | null;
@@ -105,7 +105,7 @@ export async function loadReminders(db: Db, orgId: string, timezone: string, fil
     guardianName: string | null;
     phone: string | null;
     optOut: boolean;
-    therapistName: string;
+    therapistName: string | null;
     manualSentAt: Date | null;
     autoStatus: string | null;
     autoAt: Date | null;
@@ -121,8 +121,8 @@ export async function loadReminders(db: Db, orgId: string, timezone: string, fil
             na.status AS auto_status, na.sent_at AS auto_at, na.failure_reason AS auto_reason, na.attempts AS auto_attempts
        FROM appointments a
        JOIN patients p ON p.organization_id = a.organization_id AND p.id = a.patient_id
-       JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
-       JOIN users u ON u.id = m.user_id
+       LEFT JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
+       LEFT JOIN users u ON u.id = m.user_id
        LEFT JOIN LATERAL (
          SELECT full_name, phone, wa_opt_out FROM guardians gg
           WHERE gg.organization_id = a.organization_id AND gg.patient_id = a.patient_id
@@ -159,7 +159,8 @@ export async function loadReminders(db: Db, orgId: string, timezone: string, fil
       hari: DAYS[Number(r.dayNo)] ?? '',
       tanggal: fmtDate.format(new Date(`${r.localDate}T00:00:00Z`)),
       jam: joinList(sessions.map((s) => s.localTime)),
-      terapis: joinList([...new Set(sessions.map((s) => s.therapistName))]),
+      // Jadwal boleh belum memiliki terapis (ditentukan saat absen).
+      terapis: joinList([...new Set(sessions.map((s) => s.therapistName).filter((n): n is string => Boolean(n)))]) || 'terapis kami',
     });
     return {
       patientId: r.patientId,

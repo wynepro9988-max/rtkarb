@@ -62,7 +62,7 @@ describe('Pengenalan judul kolom dan tanggal', () => {
       'Nama Panggilan': 'nickname',
       'Tgl. Lahir': 'birthDate',
       'Tempat, Tanggal Lahir': 'birthDate',
-      'Tempat Lahir': 'lain',
+      'Tempat Lahir': 'birthPlace',
       'L/P': 'sex',
       'Jenis Kelamin': 'sex',
       'Nama Ibu': 'motherName',
@@ -78,7 +78,11 @@ describe('Pengenalan judul kolom dan tanggal', () => {
       'Status Anak': 'status',
       'Kode Pasien': 'notes',
       Keterangan: 'notes',
-      Diagnosa: 'lain',
+      Diagnosa: 'findings',
+      KELUHAN: 'complaint',
+      'Cap waktu': 'registeredOn',
+      Timestamp: 'registeredOn',
+      'HARI PEMERIKSAAN ASSESMENT': 'lain',
       'Budi Santoso': null,
     };
     for (const [label, field] of Object.entries(cases)) expect([label, headerField(label)]).toEqual([label, field]);
@@ -288,6 +292,72 @@ describe('Pratinjau dan impor melalui API', () => {
     expect(p.rows[0].patient).toMatchObject({ fullName: 'DEMO Anak Empat', birthDate: '2017-08-17', sex: 'P' });
     // Nomor tanpa nama wali tetap disimpan dengan nama pengganti yang jelas.
     expect(p.rows[0].patient.guardians).toEqual([{ fullName: 'Orang tua DEMO Anak Empat', relationship: 'Orang tua', phone: '081200000004', email: null, isPrimary: true }]);
+  });
+
+  it('formulir Google (tiruan DEMO): TTL dipisah jadi tempat & tanggal lahir, keluhan jadi data pemeriksaan, kiriman ganda terdeteksi', async () => {
+    const form = {
+      name: 'form-responses.xlsx',
+      content: buildXlsx([
+        {
+          name: 'Form Responses 1',
+          columns: ['Timestamp', 'NAMA LENGKAP ANAK', 'TEMPAT, TANGGAL LAHIR ANAK', 'NAMA ORANG TUA / WALI', 'ALAMAT', 'KELUHAN', 'HARI PEMERIKSAAN ASSESMENT', 'Nomor WA AKTIF', 'JAM PEMERIKSAAN ASSESMENT'].map((header) => ({ header })),
+          rows: [
+            ['16/07/2025 10:33:06', 'DEMO Form Satu', 'Wonogiri, 31 Maret 2021', 'DEMO Ibu & DEMO Ayah', 'DEMO Perum Contoh RT 01', 'DEMO kurang fokus', 'Kamis sore', '081200004001', ''],
+            ['01/08/2025 12:49:20', 'DEMO Form Dua', 'Karanganyar 18 September 2019', 'DEMO Wali Dua', 'DEMO Dusun Contoh', 'DEMO motorik halus kurang', 'Rabu', '089600004002', ''],
+            ['02/08/2025 12:12:43', 'DEMO Form Satu', 'Wonogiri, 31 Maret 2021', 'DEMO Ibu & DEMO Ayah', 'DEMO Perum Contoh RT 01', 'DEMO kurang fokus', 'Selasa', '081200004001', ''],
+            ['07/05/2026 17:24:34', 'DEMO FORM TIGA', 'SURAKARTA, 11 APRIL 2025', 'DEMO WALI TIGA', 'DEMO PERUM', 'DEMO GTM', '08/05/2026', '08562900825', '11:00:00'],
+          ],
+        },
+      ]),
+    };
+    const p = json(await preview(owner, form));
+    expect(Object.fromEntries(p.columns.map((c: any) => [c.label, c.field]))).toEqual({
+      Timestamp: 'registeredOn',
+      'NAMA LENGKAP ANAK': 'fullName',
+      'TEMPAT, TANGGAL LAHIR ANAK': 'birthDate',
+      'NAMA ORANG TUA / WALI': 'guardianName',
+      ALAMAT: 'address',
+      KELUHAN: 'complaint',
+      'HARI PEMERIKSAAN ASSESMENT': null,
+      'Nomor WA AKTIF': 'guardianPhone',
+      'JAM PEMERIKSAAN ASSESMENT': null,
+    });
+    expect(p.fields.find((f: any) => f.key === 'complaint')).toMatchObject({ group: 'pemeriksaan' });
+    expect(p.summary).toEqual({ total: 4, siap: 3, duplikat: 1, dilewati: 0 });
+    expect(p.rows[0].patient).toMatchObject({
+      birthPlace: 'Wonogiri',
+      birthDate: '2021-03-31',
+      registeredOn: '2025-07-16',
+      intake: { complaint: 'DEMO kurang fokus', findings: null },
+      guardians: [{ fullName: 'DEMO Ibu & DEMO Ayah', relationship: 'Orang tua', phone: '081200004001', isPrimary: true }],
+    });
+    expect(p.rows[1].patient).toMatchObject({ birthPlace: 'Karanganyar', birthDate: '2019-09-18' });
+    expect(p.rows[2]).toMatchObject({ status: 'duplikat', issues: ['Sama dengan baris 2'] });
+    expect(p.rows[3].patient).toMatchObject({ birthPlace: 'SURAKARTA', birthDate: '2025-04-11', registeredOn: '2026-05-07' });
+
+    const r = json(await commit(owner, form));
+    expect(r.created).toBe(3);
+    const { rows } = await env.adminPool.query(
+      `SELECT p.full_name, p.birth_place, p.registered_on::text AS reg, i.complaint
+         FROM patients p LEFT JOIN patient_intakes i ON i.patient_id = p.id
+        WHERE p.organization_id = $1 AND p.full_name ILIKE 'DEMO Form%' ORDER BY lower(p.full_name)`,
+      [A.orgId],
+    );
+    expect(rows).toEqual([
+      { full_name: 'DEMO Form Dua', birth_place: 'Karanganyar', reg: '2025-08-01', complaint: 'DEMO motorik halus kurang' },
+      { full_name: 'DEMO Form Satu', birth_place: 'Wonogiri', reg: '2025-07-16', complaint: 'DEMO kurang fokus' },
+      { full_name: 'DEMO FORM TIGA', birth_place: 'SURAKARTA', reg: '2026-05-07', complaint: 'DEMO GTM' },
+    ]);
+    // Pasien hasil impor belum punya foto informed consent.
+    const list = json(await owner.get('/api/patients?q=DEMO%20Form&status=aktif'));
+    expect(list.items.every((x: any) => x.hasConsent === false)).toBe(true);
+  });
+
+  it('PDF ditolak dengan petunjuk mengunduh Excel dari Google Sheets', async () => {
+    const pdf = { name: 'form.pdf', content: Buffer.from('%PDF-1.4\n% DEMO\n') };
+    const res = await preview(owner, pdf);
+    expect(res.statusCode).toBe(400);
+    expect(json(res).error.message).toMatch(/Download → Microsoft Excel/);
   });
 
   it('batas jumlah baris dan jenis berkas', async () => {

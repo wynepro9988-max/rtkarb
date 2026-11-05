@@ -9,7 +9,8 @@ import { requirePatient } from './patients.ts';
 
 const createBody = z.object({
   patientId: z.uuid(),
-  therapistMemberId: z.uuid(),
+  // Terapis boleh dikosongkan: diisi saat absen (keputusan owner 5 Nov 2026).
+  therapistMemberId: z.uuid().nullish(),
   serviceId: z.uuid().nullish(),
   date: zDate,
   time: zTime,
@@ -24,9 +25,11 @@ const createBody = z.object({
 const rescheduleBody = z.object({
   date: zDate,
   time: zTime,
-  therapistMemberId: z.uuid().optional(),
+  therapistMemberId: z.uuid().nullish(),
   durationMinutes: z.number().int().min(5).max(480).optional(),
 });
+
+const completeBody = z.object({ therapistMemberId: z.uuid().optional() }).default({});
 
 const reasonBody = z.object({ reason: zText(3, 500) });
 
@@ -44,16 +47,16 @@ export const APPT_SELECT = `
 export const APPT_FROM = `
   FROM appointments a
   LEFT JOIN patients p ON p.organization_id = a.organization_id AND p.id = a.patient_id
-  JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
-  JOIN users u ON u.id = m.user_id
+  LEFT JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
+  LEFT JOIN users u ON u.id = m.user_id
   LEFT JOIN therapy_services s ON s.organization_id = a.organization_id AND s.id = a.service_id
   LEFT JOIN patient_packages pp ON pp.organization_id = a.organization_id AND pp.id = a.patient_package_id
   LEFT JOIN therapy_notes n ON n.organization_id = a.organization_id AND n.appointment_id = a.id`;
 
-interface ApptRow {
+export interface ApptRow {
   id: string;
   patientId: string;
-  therapistMemberId: string;
+  therapistMemberId: string | null;
   serviceId: string | null;
   status: string;
   billing: string;
@@ -62,9 +65,11 @@ interface ApptRow {
   durationMinutes: number;
   localDate: string;
   startsAt: Date;
+  // Diisi completeAppointment: apakah honor sesi terhitung.
+  compensated?: boolean;
 }
 
-async function lockAppointment(db: Db, ctx: AuthContext, id: string): Promise<ApptRow> {
+export async function lockAppointment(db: Db, ctx: AuthContext, id: string): Promise<ApptRow> {
   const a = await db.maybe<ApptRow>(
     `SELECT id, patient_id, therapist_member_id, service_id, status, billing, patient_package_id, price, duration_minutes, starts_at,
             to_char(starts_at AT TIME ZONE $3, 'YYYY-MM-DD') AS local_date
@@ -77,11 +82,11 @@ async function lockAppointment(db: Db, ctx: AuthContext, id: string): Promise<Ap
 
 function assertCanRecordSession(ctx: AuthContext, a: ApptRow) {
   if (can(ctx, 'session.complete')) return;
-  if (can(ctx, 'session.complete.own') && a.therapistMemberId === ctx.memberId) return;
+  if (can(ctx, 'session.complete.own') && a.therapistMemberId !== null && a.therapistMemberId === ctx.memberId) return;
   throw forbidden('Anda hanya dapat mencatat sesi yang Anda tangani');
 }
 
-async function requireTherapist(db: Db, orgId: string, memberId: string) {
+export async function requireTherapist(db: Db, orgId: string, memberId: string) {
   const t = await db.maybe(
     `SELECT 1 FROM memberships WHERE organization_id = $1 AND id = $2 AND status = 'active' AND is_therapist`,
     [orgId, memberId],
@@ -89,17 +94,17 @@ async function requireTherapist(db: Db, orgId: string, memberId: string) {
   if (!t) throw badRequest('Terapis tidak valid atau tidak aktif');
 }
 
-// Mencegah jadwal bentrok untuk terapis maupun pasien.
+// Mencegah jadwal bentrok untuk terapis (bila sudah ditentukan) maupun pasien.
 async function assertNoOverlap(
   db: Db,
   orgId: string,
-  therapistId: string,
+  therapistId: string | null,
   patientId: string,
   startsAt: string,
   minutes: number,
   excludeId: string | null,
 ) {
-  await db.exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`therapist:${therapistId}`]);
+  await db.exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [therapistId ? `therapist:${therapistId}` : `patient:${patientId}`]);
   const clash = await db.maybe<{ who: string }>(
     `SELECT CASE WHEN therapist_member_id = $2 THEN 'terapis' ELSE 'pasien' END AS who
        FROM appointments
@@ -120,7 +125,68 @@ async function assertNoOverlap(
   }
 }
 
-async function toTimestamp(db: Db, date: string, time: string, tz: string): Promise<string> {
+// Menautkan terapis ke pasien (dasar akses terapis ke data & catatan pasien).
+export async function linkTherapist(db: Db, ctx: AuthContext, patientId: string, memberId: string) {
+  await db.exec(
+    `INSERT INTO patient_therapists (organization_id, patient_id, member_id, created_by)
+     VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+    [ctx.orgId, patientId, memberId, ctx.userId],
+  );
+}
+
+// Mengisi terapis pada jadwal yang belum memilikinya (saat absen), lalu menautkannya ke pasien.
+export async function setTherapist(db: Db, ctx: AuthContext, a: ApptRow, memberId: string) {
+  await db.exec(`UPDATE appointments SET therapist_member_id = $3, updated_by = $4 WHERE organization_id = $1 AND id = $2`, [
+    ctx.orgId,
+    a.id,
+    memberId,
+    ctx.userId,
+  ]);
+  a.therapistMemberId = memberId;
+  await linkTherapist(db, ctx, a.patientId, memberId);
+}
+
+// Status selesai, pemakaian paket (dikunci; aman terhadap permintaan bersamaan), dan honor sesi.
+// Mengembalikan sisa sesi paket (null bila bukan paket).
+export async function completeAppointment(db: Db, ctx: AuthContext, a: ApptRow): Promise<number | null> {
+  if (a.status !== 'terjadwal') throw conflict('Sesi ini sudah tidak berstatus terjadwal');
+  const today = await db.one<{ d: string }>(`SELECT to_char(now() AT TIME ZONE $1, 'YYYY-MM-DD') AS d`, [ctx.timezone]);
+  if (a.localDate > today.d) throw badRequest('Sesi yang dijadwalkan untuk hari mendatang belum dapat diselesaikan');
+
+  let sessionsRemaining: number | null = null;
+  if (a.billing === 'paket') {
+    const pkg = await db.maybe<{ sessionsUsed: number; sessionsTotal: number }>(
+      `UPDATE patient_packages
+          SET sessions_used = sessions_used + 1,
+              status = CASE WHEN sessions_used + 1 = sessions_total THEN 'selesai' ELSE status END,
+              updated_by = $4
+        WHERE organization_id = $1 AND id = $2 AND status = 'aktif'
+          AND sessions_used < sessions_total
+          AND (expires_on IS NULL OR expires_on >= $3::date)
+        RETURNING sessions_used, sessions_total`,
+      [ctx.orgId, a.patientPackageId, a.localDate, ctx.userId],
+    );
+    if (!pkg) throw conflict('Sisa sesi paket tidak mencukupi, paket tidak aktif, atau paket sudah kedaluwarsa');
+    await db.exec(
+      `INSERT INTO package_ledger (organization_id, patient_id, patient_package_id, appointment_id, kind, sessions_delta, sessions_used_after, created_by)
+       VALUES ($1, $2, $3, $4, 'pemakaian', 1, $5, $6)`,
+      [ctx.orgId, a.patientId, a.patientPackageId, a.id, pkg.sessionsUsed, ctx.userId],
+    );
+    sessionsRemaining = pkg.sessionsTotal - pkg.sessionsUsed;
+  }
+
+  await db.exec(
+    `UPDATE appointments SET status = 'selesai', completed_at = now(), completed_by = $3, updated_by = $3
+      WHERE organization_id = $1 AND id = $2 AND status = 'terjadwal'`,
+    [ctx.orgId, a.id, ctx.userId],
+  );
+  a.status = 'selesai';
+  const comp = await db.one<{ amount: number | null }>(`SELECT compute_compensation($1) AS amount`, [a.id]);
+  a.compensated = comp.amount !== null;
+  return sessionsRemaining;
+}
+
+export async function toTimestamp(db: Db, date: string, time: string, tz: string): Promise<string> {
   const r = await db.one<{ ts: Date }>(`SELECT (($1::date + $2::time)::timestamp AT TIME ZONE $3) AS ts`, [date, time, tz]);
   return r.ts.toISOString();
 }
@@ -188,7 +254,8 @@ export async function appointmentRoutes(app: FastifyInstance) {
     const created = await tenantTx(app, ctx, async (db) => {
       const patient = await requirePatient(db, ctx.orgId!, body.patientId);
       if (patient.status !== 'aktif') throw badRequest('Pasien tidak berstatus aktif');
-      await requireTherapist(db, ctx.orgId!, body.therapistMemberId);
+      const therapistId = body.therapistMemberId ?? null;
+      if (therapistId) await requireTherapist(db, ctx.orgId!, therapistId);
 
       let duration = body.durationMinutes;
       let price = 0;
@@ -226,23 +293,19 @@ export async function appointmentRoutes(app: FastifyInstance) {
       for (let week = 0; week < body.repeatWeeks; week++) {
         const date = new Date(Date.parse(`${body.date}T00:00:00Z`) + week * 7 * 86_400_000).toISOString().slice(0, 10);
         const startsAt = await toTimestamp(db, date, body.time, ctx.timezone);
-        await assertNoOverlap(db, ctx.orgId!, body.therapistMemberId, body.patientId, startsAt, duration, null);
+        await assertNoOverlap(db, ctx.orgId!, therapistId, body.patientId, startsAt, duration, null);
         const row = await db.one<{ id: string }>(
           `INSERT INTO appointments
              (organization_id, patient_id, therapist_member_id, service_id, starts_at, duration_minutes, billing, patient_package_id, price, admin_notes, created_by, updated_by)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11) RETURNING id`,
-          [ctx.orgId, body.patientId, body.therapistMemberId, serviceId, startsAt, duration, body.billing, packageId, price, body.adminNotes, ctx.userId],
+          [ctx.orgId, body.patientId, therapistId, serviceId, startsAt, duration, body.billing, packageId, price, body.adminNotes, ctx.userId],
         );
         ids.push(row.id);
         await audit(db, req, ctx, { action: 'jadwal.dibuat', entityType: 'appointment', entityId: row.id });
       }
 
       // Terapis yang dijadwalkan otomatis ditugaskan ke pasien agar dapat menulis catatan.
-      await db.exec(
-        `INSERT INTO patient_therapists (organization_id, patient_id, member_id, created_by)
-         VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-        [ctx.orgId, body.patientId, body.therapistMemberId, ctx.userId],
-      );
+      if (therapistId) await linkTherapist(db, ctx, body.patientId, therapistId);
       return ids;
     });
     return reply.status(201).send({ ids: created });
@@ -255,8 +318,8 @@ export async function appointmentRoutes(app: FastifyInstance) {
     return tenantTx(app, ctx, async (db) => {
       const a = await lockAppointment(db, ctx, id);
       if (a.status !== 'terjadwal') throw conflict('Hanya jadwal berstatus terjadwal yang dapat dijadwalkan ulang');
-      const therapist = body.therapistMemberId ?? a.therapistMemberId;
-      if (body.therapistMemberId) await requireTherapist(db, ctx.orgId!, therapist);
+      const therapist = body.therapistMemberId === undefined ? a.therapistMemberId : body.therapistMemberId;
+      if (therapist) await requireTherapist(db, ctx.orgId!, therapist);
       const duration = body.durationMinutes ?? a.durationMinutes;
       const startsAt = await toTimestamp(db, body.date, body.time, ctx.timezone);
       await assertNoOverlap(db, ctx.orgId!, therapist, a.patientId, startsAt, duration, a.id);
@@ -271,10 +334,7 @@ export async function appointmentRoutes(app: FastifyInstance) {
          RETURNING id`,
         [ctx.orgId, id, therapist, startsAt, duration, ctx.userId],
       );
-      await db.exec(
-        `INSERT INTO patient_therapists (organization_id, patient_id, member_id, created_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-        [ctx.orgId, a.patientId, therapist, ctx.userId],
-      );
+      if (therapist) await linkTherapist(db, ctx, a.patientId, therapist);
       await audit(db, req, ctx, { action: 'jadwal.dijadwal_ulang', entityType: 'appointment', entityId: id, meta: { jadwal_baru: row.id } });
       await audit(db, req, ctx, { action: 'jadwal.dibuat', entityType: 'appointment', entityId: row.id, meta: { dari: id } });
       return { id: row.id };
@@ -298,50 +358,26 @@ export async function appointmentRoutes(app: FastifyInstance) {
   });
 
   // Menyelesaikan sesi: status, pemakaian paket, dan kompensasi dalam satu transaksi.
+  // Jadwal tanpa terapis hanya dapat diselesaikan oleh admin/owner dengan memilih terapisnya.
   app.post('/appointments/:id/complete', async (req) => {
     const ctx = needTenant(req, 'session.complete', 'session.complete.own');
     const id = idParam(req.params);
+    const body = parse(completeBody, req.body ?? {});
     return tenantTx(app, ctx, async (db) => {
       const a = await lockAppointment(db, ctx, id);
-      assertCanRecordSession(ctx, a);
-      if (a.status !== 'terjadwal') throw conflict('Sesi ini sudah tidak berstatus terjadwal');
-      const today = await db.one<{ d: string }>(`SELECT to_char(now() AT TIME ZONE $1, 'YYYY-MM-DD') AS d`, [ctx.timezone]);
-      if (a.localDate > today.d) throw badRequest('Sesi yang dijadwalkan untuk hari mendatang belum dapat diselesaikan');
-
-      let sessionsRemaining: number | null = null;
-      if (a.billing === 'paket') {
-        // Kunci baris paket + syarat saldo: aman terhadap permintaan bersamaan.
-        const pkg = await db.maybe<{ sessionsUsed: number; sessionsTotal: number }>(
-          `UPDATE patient_packages
-              SET sessions_used = sessions_used + 1,
-                  status = CASE WHEN sessions_used + 1 = sessions_total THEN 'selesai' ELSE status END,
-                  updated_by = $4
-            WHERE organization_id = $1 AND id = $2 AND status = 'aktif'
-              AND sessions_used < sessions_total
-              AND (expires_on IS NULL OR expires_on >= $3::date)
-            RETURNING sessions_used, sessions_total`,
-          [ctx.orgId, a.patientPackageId, a.localDate, ctx.userId],
-        );
-        if (!pkg) throw conflict('Sisa sesi paket tidak mencukupi, paket tidak aktif, atau paket sudah kedaluwarsa');
-        await db.exec(
-          `INSERT INTO package_ledger (organization_id, patient_id, patient_package_id, appointment_id, kind, sessions_delta, sessions_used_after, created_by)
-           VALUES ($1, $2, $3, $4, 'pemakaian', 1, $5, $6)`,
-          [ctx.orgId, a.patientId, a.patientPackageId, a.id, pkg.sessionsUsed, ctx.userId],
-        );
-        sessionsRemaining = pkg.sessionsTotal - pkg.sessionsUsed;
+      if (!a.therapistMemberId) {
+        if (!can(ctx, 'session.complete')) throw forbidden('Gunakan menu Absen untuk mencatat sesi ini');
+        if (!body.therapistMemberId) throw badRequest('Pilih terapis yang menangani sesi ini');
+        await requireTherapist(db, ctx.orgId!, body.therapistMemberId);
+        await setTherapist(db, ctx, a, body.therapistMemberId);
       }
-
-      await db.exec(
-        `UPDATE appointments SET status = 'selesai', completed_at = now(), completed_by = $3, updated_by = $3
-          WHERE organization_id = $1 AND id = $2 AND status = 'terjadwal'`,
-        [ctx.orgId, id, ctx.userId],
-      );
-      const comp = await db.one<{ amount: number | null }>(`SELECT compute_compensation($1) AS amount`, [id]);
+      assertCanRecordSession(ctx, a);
+      const sessionsRemaining = await completeAppointment(db, ctx, a);
       await audit(db, req, ctx, {
         action: 'sesi.selesai',
         entityType: 'appointment',
         entityId: id,
-        meta: { tagihan: a.billing, kompensasi_dihitung: comp.amount !== null },
+        meta: { tagihan: a.billing, kompensasi_dihitung: a.compensated },
       });
       return { ok: true, sessionsRemaining };
     });

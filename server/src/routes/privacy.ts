@@ -83,8 +83,8 @@ export async function privacyRoutes(app: FastifyInstance) {
       const guardians = await q(`SELECT full_name, relationship, phone, email, address FROM guardians WHERE organization_id = $1 AND patient_id = $2 AND $3::text IS NOT NULL ORDER BY is_primary DESC`);
       const appts = await q(
         `SELECT to_char(a.starts_at AT TIME ZONE $3, 'DD-MM-YYYY HH24:MI') AS at, s.name AS service, u.full_name AS therapist, a.status
-           FROM appointments a JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
-           JOIN users u ON u.id = m.user_id LEFT JOIN therapy_services s ON s.organization_id = a.organization_id AND s.id = a.service_id
+           FROM appointments a LEFT JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
+           LEFT JOIN users u ON u.id = m.user_id LEFT JOIN therapy_services s ON s.organization_id = a.organization_id AND s.id = a.service_id
           WHERE a.organization_id = $1 AND a.patient_id = $2 ORDER BY a.starts_at`,
       );
       const programs = await q(
@@ -174,7 +174,7 @@ export async function privacyRoutes(app: FastifyInstance) {
       );
       if (!p) throw notFound('Pasien');
       if (p.anonymizedAt) throw conflict('Data pasien ini sudah dianonimkan');
-      if (body.confirmCode !== p.patientCode) throw badRequest('Kode konfirmasi tidak sama dengan kode pasien');
+      if (body.confirmCode !== p.patientCode) throw badRequest('Kode konfirmasi tidak sama dengan No. RM pasien');
       const pending = await db.maybe(`SELECT 1 FROM appointments WHERE organization_id = $1 AND patient_id = $2 AND status = 'terjadwal' LIMIT 1`, [ctx.orgId, id]);
       if (pending) throw conflict('Masih ada jadwal terjadwal. Batalkan jadwal tersebut terlebih dahulu.');
       const { keys } = await db.one<{ keys: string[] }>(`SELECT anonymize_patient($1, $2) AS keys`, [id, body.mode]);

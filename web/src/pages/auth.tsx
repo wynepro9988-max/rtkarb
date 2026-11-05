@@ -70,7 +70,7 @@ export function LoginPage() {
   return (
     <AuthCard title="Masuk" lead="Gunakan akun yang diberikan oleh pengelola organisasi Anda.">
       <form className="form" onSubmit={submit}>
-        <Field label="Username">
+        <Field label="Username" hint="Orang tua: masukkan No. RM anak (mis. RB-0012) bila itu username Anda.">
           {(id) => (
             <input id={id} className="input" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={identifier} onChange={(e) => setIdentifier(e.target.value)} required />
           )}
@@ -103,6 +103,7 @@ function useFragmentToken() {
 
 interface TokenInfo {
   purpose: string;
+  suggestedUsername?: string | null;
   account: string | null;
   fullName: string | null;
   role: string | null;
@@ -157,7 +158,8 @@ export function ActivatePage() {
   const [done, setDone] = useState(false);
   useEffect(() => {
     setFullName(info?.fullName ?? '');
-    setUsername(suggestUsername(info?.fullName ?? null));
+    // Orang tua: No. RM anak (bila belum dipakai akun lain) agar mudah diingat.
+    setUsername(info?.suggestedUsername ?? suggestUsername(info?.fullName ?? null));
   }, [info]);
   const { busy, error, submit } = useSubmit(() => post('/auth/accept-invitation', { token, username, password, fullName }), () => setDone(true));
 
@@ -185,7 +187,14 @@ export function ActivatePage() {
     >
       <form className="form" onSubmit={submit}>
         <Field label="Nama lengkap">{(id) => <input id={id} className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} required minLength={2} />}</Field>
-        <Field label="Username" hint="Dipakai untuk masuk. 3–32 karakter: huruf kecil, angka, titik, garis bawah, atau tanda hubung.">
+        <Field
+          label="Username"
+          hint={
+            info.suggestedUsername
+              ? 'Sudah diisi No. RM anak Anda, sehingga Anda masuk dengan No. RM dan kata sandi. Boleh diganti.'
+              : 'Dipakai untuk masuk. 3–32 karakter: huruf kecil, angka, titik, garis bawah, atau tanda hubung.'
+          }
+        >
           {(id) => (
             <input
               id={id}

@@ -493,3 +493,73 @@ sendiri yang memilih berkas dan baris yang diimpor.
 daftar baris yang dikecualikan menggagalkan 1 test; mengimpor duplikat tanpa diminta
 menggagalkan 2 test. Diperiksa di browser (laptop dan HP) dengan berkas DEMO berjudul dua
 tingkat dan format tanggal campur.
+
+## 24. Absen sesi, jadwal tanpa terapis, No. RM, Pasien Baru, video/foto (5 Nov 2026)
+
+**Permintaan klien (diteruskan owner):** anak bisa menjalani dua layanan (OT dan TW); jadwal cukup
+pasien dan layanan, terapis ditentukan saat absen; satu pasien satu No. RM; terapis absen dengan
+memilih No. RM/nama dan layanan, menulis aktivitas dan PR, serta mengunggah video/foto; menu Pasien
+Baru yang lengkap; orang tua masuk dengan No. RM. Keputusan owner: K1, K5, K9, K10 di
+[06-keputusan-terbuka.md](06-keputusan-terbuka.md).
+
+- **No. RM**: kode pasien otomatis yang sudah ada (unik per organisasi, awalan diatur owner) kini
+  disebut No. RM di semua layar, ekspor, dan pencarian.
+- **Jadwal tanpa terapis** (migrasi `012`): `appointments.therapist_member_id` boleh kosong; sesi
+  selesai wajib memiliki terapis (CHECK). Pemeriksaan bentrok tetap untuk pasien. Dasbor,
+  pengingat WA ("terapis kami"), laporan, dan dasbor orang tua menampilkan jadwal tanpa terapis.
+- **Absen sesi** (menu *Absen Sesi*): daftar jadwal yang menunggu absen (termasuk yang belum
+  memiliki terapis) dan yang sudah diabsen; absen tanpa jadwal. Satu transaksi: terapis tertaut
+  ke anak, jadwal dipakai bila ada (atau dibuat), paket layanan itu dipotong (atau per sesi),
+  honor terhitung, aktivitas & PR menjadi catatan final. Admin dapat mengabsenkan dengan memilih
+  terapis (termasuk pengganti; tercatat di audit `sesi.diabsen`).
+- **Dua layanan**: paket sudah per layanan; OT dan TW di hari yang sama oleh terapis berbeda
+  memotong paket masing-masing.
+- **Video/foto sesi** (`session_media`): unggah dengan progres dari HP, durasi video diperiksa di
+  perangkat dan di server, putar langsung (Range). Hak lihat mengikuti cakupan catatan klinis.
+- **Pasien Baru** (menu baru): identitas, tempat lahir, ayah & ibu + No. WA, kontak utama,
+  keluhan awal, hasil pemeriksaan, program (pilih layanan + uraian), berkas opsional KTP/KIA/foto
+  anak (dokumen administrasi). Pemeriksaan awal dapat diubah dari halaman pasien.
+- **Login orang tua dengan No. RM**: undangan wali menyimpan No. RM anak sebagai saran username;
+  halaman aktivasi sudah terisi, dan login menerima No. RM (huruf besar/kecil sama).
+- Anonimisasi kini juga menghapus tempat lahir dan video/foto anak; mode penuh mengosongkan data
+  pemeriksaan.
+
+**Bukti:** 14 test baru (`absen.test.ts`), total 199 lulus. Uji mutasi: tanpa penautan terapis
+saat absen 4 test gagal; tanpa batas 30 detik 1 test gagal; kebijakan RLS data pemeriksaan
+dilonggarkan 1 test gagal. Diperiksa di browser (laptop dan HP) dengan data DEMO: pendaftaran
+lengkap, jadwal tanpa terapis, absen oleh terapis, unggah video/foto (video 10 detik ditolak),
+undangan orang tua dengan username No. RM, dan aktivitas & PR tampil di dasbor orang tua tanpa video.
+
+**Tambahan (5 Nov 2026, malam):**
+- **Informed consent wajib** di formulir Pasien Baru (keputusan K6). `patient_documents.doc_type`
+  menandai berkas pendaftaran (informed consent, KTP orang tua, KIA, foto anak). Pasien tanpa
+  consent ditandai di daftar dan halaman pasien, dengan tombol unggah langsung.
+- **Impor dari Google Form pendaftaran**: kolom *Timestamp/Cap waktu* menjadi tanggal daftar,
+  *Tempat, tanggal lahir* dipisah menjadi tempat lahir dan tanggal lahir, *Keluhan* menjadi
+  keluhan awal (data pemeriksaan), *Diagnosa/Hasil pemeriksaan* dan *Program* juga dikenali.
+  Isian pemeriksaan hanya tersedia bagi pengguna berhak `patient.intake`. Berkas PDF ditolak
+  dengan petunjuk mengunduh Excel dari Google Sheets (tabel PDF tidak terbaca andal).
+- Bukti: 3 test tambahan (tiruan formulir Google berisi data DEMO, penolakan PDF, informed
+  consent); total 202 lulus. Diperiksa di browser: formulir menolak kirim tanpa consent, tanda di
+  daftar pasien, dan unggah consent dari halaman pasien.
+
+## 25. Pendaftaran online pengganti Google Form (5 Nov 2026)
+
+**Permintaan owner:** formulir Google "PENDAFTARAN PASIEN BARU DI RUMAH BINTANG" dipindah ke
+aplikasi (keputusan K11).
+
+- Halaman publik `/daftar/<token>` (nyaman di HP, tanpa akun): nama anak, tempat & tanggal lahir,
+  nama orang tua/wali + hubungan, No. WA, alamat, keluhan, hari & jam asesmen, centang persetujuan.
+- Menu Pasien Baru: panel *Pendaftaran online* berisi tautan (salin / bagikan lewat WhatsApp),
+  tombol buka/tutup dan ganti tautan (owner), serta daftar kiriman masuk dengan penanda
+  kemungkinan ganda. *Proses* mengisi formulir Pasien Baru; setelah disimpan No. RM terbit, data
+  ditandai diterima, dan jendela jadwal asesmen terbuka dengan tanggal & jam pilihan orang tua
+  (tagihan tetap dipilih admin). *Tolak* wajib beralasan. Dasbor admin/owner menampilkan jumlah
+  pendaftaran yang menunggu.
+- Migrasi `013`: `organizations.registration_token/registration_open`, tabel
+  `registration_requests`, fungsi `public_registration_info` dan `submit_registration`.
+
+**Bukti:** 7 test baru (`registrations.test.ts`), total 209 lulus. Uji mutasi: kebijakan baca
+RLS tanpa syarat cakupan intake menggagalkan 1 test. Diperiksa di browser: owner membuka
+pendaftaran, orang tua mengisi dari HP, admin melihat penanda di dasbor, memproses (formulir
+terisi otomatis), No. RM terbit, dan jadwal asesmen dibuat sesuai pilihan orang tua.

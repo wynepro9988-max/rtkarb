@@ -38,6 +38,8 @@ cp .env.example .env && chmod 600 .env   # isi nilai produksi
 npm run db:migrate                  # memakai DATABASE_ADMIN_URL (rtka_owner)
 ```
 
+Untuk video/foto sesi di VPS: `MAX_UPLOAD_MB=30` dan `ORG_STORAGE_QUOTA_MB=40960` (keputusan K10).
+
 Nilai wajib di `.env` produksi:
 
 - `NODE_ENV=production`

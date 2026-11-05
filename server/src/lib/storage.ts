@@ -11,7 +11,10 @@ export interface FileStore {
 }
 
 function assertKey(key: string) {
-  if (!/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(pdf|jpg|png)$/.test(key)) throw new Error('Kunci penyimpanan tidak valid');
+  // Dokumen: org/uuid.ext. Video/foto sesi: org/sesi/uuid.ext.
+  if (!/^[0-9a-f-]{36}\/(?:[0-9a-f-]{36}\.(pdf|jpg|png)|sesi\/[0-9a-f-]{36}\.(jpg|png|webp|mp4|mov|3gp))$/.test(key)) {
+    throw new Error('Kunci penyimpanan tidak valid');
+  }
 }
 
 // Disk lokal (pengembangan / VPS). Folder di luar web root, izin 0700/0600.

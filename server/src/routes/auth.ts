@@ -207,8 +207,10 @@ export async function authRoutes(app: FastifyInstance) {
     const info = await authTx(
       app,
       (db) =>
-        db.maybe<{ purpose: string; account: string | null; fullName: string | null; role: string | null; organizationName: string; expiresAt: Date }>(
-          `SELECT t.purpose, coalesce(u.username, u.email, t.email) AS account, t.full_name, t.role, o.name AS organization_name, t.expires_at
+        db.maybe<{ purpose: string; account: string | null; fullName: string | null; role: string | null; organizationName: string; expiresAt: Date; suggestedUsername: string | null }>(
+          `SELECT t.purpose, coalesce(u.username, u.email, t.email) AS account, t.full_name, t.role, o.name AS organization_name, t.expires_at,
+                  -- Saran username (No. RM anak untuk orang tua) hanya bila belum dipakai akun lain.
+                  CASE WHEN NOT EXISTS (SELECT 1 FROM users x WHERE x.username = t.suggested_username) THEN t.suggested_username END AS suggested_username
              FROM account_tokens t
              JOIN organizations o ON o.id = t.organization_id
              LEFT JOIN users u ON u.id = t.user_id

@@ -261,7 +261,7 @@ function AnonymizeDialog({ patient, requests, onClose, onDone }: { patient: any;
         <Field label="Alasan" hint="Minimal 10 karakter, tercatat di audit log">
           {(id) => <textarea id={id} className="textarea" value={reason} onChange={(e) => setReason(e.target.value)} required minLength={10} maxLength={500} />}
         </Field>
-        <Field label={`Ketik kode pasien "${patient.patientCode}" untuk konfirmasi`}>
+        <Field label={`Ketik No. RM "${patient.patientCode}" untuk konfirmasi`}>
           {(id) => <input id={id} className="input mono" value={confirmCode} onChange={(e) => setConfirmCode(e.target.value)} autoComplete="off" required />}
         </Field>
         <ErrorBox error={error} />

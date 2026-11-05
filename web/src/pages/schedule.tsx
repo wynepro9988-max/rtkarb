@@ -4,6 +4,7 @@ import { get, post, qs, useApi } from '../api.ts';
 import { useAuth } from '../auth.tsx';
 import { addDays, APPT_STATUS, BILLING, formatRupiah, formatWeekday, todayIn } from '../format.ts';
 import { Badge, Dialog, Empty, ErrorBox, Field, Icon, Loading, MoneyInput, PageHeader, ReasonDialog, useSubmit, useToast } from '../ui.tsx';
+import { SessionMediaDialog } from '../components/session-media.tsx';
 import { searchPatients } from './patients.tsx';
 
 export function SchedulePage() {
@@ -93,10 +94,12 @@ export function SchedulePage() {
 function AppointmentRow({ a, onChanged }: { a: any; onChanged: () => void }) {
   const { can, me } = useAuth();
   const toast = useToast();
-  const [dialog, setDialog] = useState<null | 'cancel' | 'reopen' | 'reschedule'>(null);
+  const [dialog, setDialog] = useState<null | 'cancel' | 'reopen' | 'reschedule' | 'media'>(null);
   const [busy, setBusy] = useState(false);
-  const own = a.therapistMemberId === me?.membership?.id;
-  const canRecord = can('session.complete') || (can('session.complete.own') && own);
+  const own = Boolean(a.therapistMemberId) && a.therapistMemberId === me?.membership?.id;
+  // Jadwal tanpa terapis diselesaikan lewat Absen (terapis dipilih saat itu).
+  const unassigned = !a.therapistMemberId;
+  const canRecord = !unassigned && (can('session.complete') || (can('session.complete.own') && own));
 
   const act = async (path: string, message: string) => {
     setBusy(true);
@@ -122,7 +125,8 @@ function AppointmentRow({ a, onChanged }: { a: any; onChanged: () => void }) {
           {a.patientId && can('patient.read', 'patient.read.assigned') ? <Link to={`/pasien/${a.patientId}`}>{a.patientName}</Link> : (a.patientName ?? 'Pasien')}
         </strong>
         <span>
-          {a.serviceName ?? 'Sesi terapi'} · {a.therapistName} · {BILLING[a.billing]}
+          {a.patientCode ? <span className="mono">{a.patientCode} · </span> : null}
+          {a.serviceName ?? 'Sesi terapi'} · {a.therapistName ?? 'terapis belum ditentukan'} · {BILLING[a.billing]}
           {a.packageName ? ` (${a.packageName})` : ''}
           {a.billing === 'per_sesi' && a.price ? ` · ${formatRupiah(a.price)}` : ''}
         </span>
@@ -140,6 +144,16 @@ function AppointmentRow({ a, onChanged }: { a: any; onChanged: () => void }) {
         </div>
       </div>
       <div className="actions row">
+        {a.status === 'terjadwal' && unassigned && can('session.log.own', 'session.complete') ? (
+          <Link className="btn btn-sm" to={`/absen?jadwal=${a.id}`}>
+            <Icon name="check" /> Absen
+          </Link>
+        ) : null}
+        {a.status === 'selesai' && can('therapy.note.read', 'therapy.note.read.assigned') ? (
+          <button className="btn btn-sm btn-ghost" onClick={() => setDialog('media')}>
+            Video/foto
+          </button>
+        ) : null}
         {a.status === 'terjadwal' && canRecord ? (
           <>
             <button className="btn btn-sm" disabled={busy} onClick={() => act('complete', 'Sesi ditandai selesai')}>
@@ -204,6 +218,14 @@ function AppointmentRow({ a, onChanged }: { a: any; onChanged: () => void }) {
         />
       ) : null}
       {dialog === 'reschedule' ? <RescheduleDialog a={a} onClose={() => setDialog(null)} onSaved={onChanged} /> : null}
+      {dialog === 'media' ? (
+        <SessionMediaDialog
+          appointmentId={a.id}
+          title={`Video/foto: ${a.patientName ?? 'sesi'}`}
+          canUpload={can('session.media.upload') && (own || can('therapy.note.read'))}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -212,10 +234,10 @@ function RescheduleDialog({ a, onClose, onSaved }: { a: any; onClose: () => void
   const { data: therapists } = useApi<any[]>('/staff/therapists');
   const [date, setDate] = useState(a.localDate);
   const [time, setTime] = useState(a.localTime);
-  const [therapist, setTherapist] = useState(a.therapistMemberId);
+  const [therapist, setTherapist] = useState<string>(a.therapistMemberId ?? '');
   const toast = useToast();
   const { busy, error, submit } = useSubmit(
-    () => post(`/appointments/${a.id}/reschedule`, { date, time, ...(therapist !== a.therapistMemberId ? { therapistMemberId: therapist } : {}) }),
+    () => post(`/appointments/${a.id}/reschedule`, { date, time, ...(therapist !== (a.therapistMemberId ?? '') ? { therapistMemberId: therapist || null } : {}) }),
     () => {
       toast('Jadwal dipindahkan');
       onSaved();
@@ -231,6 +253,7 @@ function RescheduleDialog({ a, onClose, onSaved }: { a: any; onClose: () => void
           <Field label="Terapis" full>
             {(id) => (
               <select id={id} className="select" value={therapist} onChange={(e) => setTherapist(e.target.value)}>
+                <option value="">Ditentukan saat absen</option>
                 {therapists?.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.fullName}
@@ -281,7 +304,7 @@ export function PatientPicker({ value, onChange }: { value: any | null; onChange
     <div>
       <div className="search">
         <Icon name="search" />
-        <input className="input" placeholder="Ketik minimal 2 huruf nama/kode pasien" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Cari pasien" />
+        <input className="input" placeholder="Ketik No. RM atau minimal 2 huruf nama" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Cari pasien" />
       </div>
       {results.length ? (
         <div className="card" style={{ marginTop: 6, maxHeight: 220, overflowY: 'auto' }}>
@@ -302,7 +325,21 @@ export function PatientPicker({ value, onChange }: { value: any | null; onChange
   );
 }
 
-export function AppointmentDialog({ presetPatient, presetDate, onClose, onSaved }: { presetPatient?: any; presetDate?: string; onClose: () => void; onSaved: () => void }) {
+export function AppointmentDialog({
+  presetPatient,
+  presetDate,
+  presetTime,
+  title = 'Buat jadwal sesi',
+  onClose,
+  onSaved,
+}: {
+  presetPatient?: any;
+  presetDate?: string;
+  presetTime?: string;
+  title?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { me } = useAuth();
   const toast = useToast();
   const [patient, setPatient] = useState<any | null>(presetPatient ?? null);
@@ -313,7 +350,7 @@ export function AppointmentDialog({ presetPatient, presetDate, onClose, onSaved 
     therapistMemberId: '',
     serviceId: '',
     date: presetDate ?? todayIn(me?.organization?.timezone),
-    time: '09:00',
+    time: presetTime ?? '09:00',
     durationMinutes: 60,
     billing: 'per_sesi',
     patientPackageId: '',
@@ -340,7 +377,7 @@ export function AppointmentDialog({ presetPatient, presetDate, onClose, onSaved 
     () =>
       post('/appointments', {
         patientId: patient?.id,
-        therapistMemberId: f.therapistMemberId,
+        therapistMemberId: f.therapistMemberId || null,
         serviceId: f.serviceId || null,
         date: f.date,
         time: f.time,
@@ -359,7 +396,7 @@ export function AppointmentDialog({ presetPatient, presetDate, onClose, onSaved 
   );
 
   return (
-    <Dialog title="Buat jadwal sesi" onClose={onClose} wide>
+    <Dialog title={title} onClose={onClose} wide>
       <form className="form" onSubmit={submit}>
         <div className="form-grid">
           <div className="field full">
@@ -372,10 +409,10 @@ export function AppointmentDialog({ presetPatient, presetDate, onClose, onSaved 
               <PatientPicker value={patient} onChange={setPatient} />
             )}
           </div>
-          <Field label="Terapis">
+          <Field label="Terapis" hint="Boleh dikosongkan; terapis tercatat saat absen.">
             {(id) => (
-              <select id={id} className="select" value={f.therapistMemberId} onChange={(e) => setF({ ...f, therapistMemberId: e.target.value })} required>
-                <option value="">Pilih terapis…</option>
+              <select id={id} className="select" value={f.therapistMemberId} onChange={(e) => setF({ ...f, therapistMemberId: e.target.value })}>
+                <option value="">Ditentukan saat absen</option>
                 {therapists?.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.fullName}

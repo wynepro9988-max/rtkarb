@@ -42,7 +42,11 @@ function DayBoard({ appts, now, linkPatients }: { appts: any[]; now: number; lin
   const pct = (m: number) => `${((m - from) / span) * 100}%`;
 
   const lanes = new Map<string, any[]>();
-  for (const a of appts) lanes.set(a.therapistName, [...(lanes.get(a.therapistName) ?? []), a]);
+  for (const a of appts) {
+    // Jadwal tanpa terapis (diisi saat absen) dikumpulkan di satu lajur.
+    const lane = a.therapistName ?? 'Belum ada terapis';
+    lanes.set(lane, [...(lanes.get(lane) ?? []), a]);
+  }
   const hours = Array.from({ length: span / 60 + 1 }, (_, i) => from / 60 + i);
 
   return (
@@ -139,6 +143,14 @@ export function DashboardPage() {
         ) : null}
       </div>
 
+      {data.registrationsPending > 0 ? (
+        <div className="alert info spread" style={{ marginBottom: 18 }}>
+          <span>{data.registrationsPending} pendaftaran online dari orang tua menunggu diproses.</span>
+          <Link className="btn btn-sm btn-secondary" to="/pendaftaran">
+            Proses pendaftaran
+          </Link>
+        </div>
+      ) : null}
       {due?.overdue > 0 ? (
         <div className="alert error" style={{ marginBottom: 18 }}>
           {due.overdue} catatan sesi melewati batas akhir bulan dan belum final. Segera lengkapi di daftar <em>Catatan sesi belum final</em>.
@@ -199,7 +211,7 @@ export function DashboardPage() {
                     <div className="who">
                       <strong>{a.patientName ?? 'Pasien'}</strong>
                       <span>
-                        {a.serviceName ?? 'Sesi terapi'}, {a.therapistName}
+                        {a.serviceName ?? 'Sesi terapi'}, {a.therapistName ?? 'terapis belum ditentukan'}
                       </span>
                       <div style={{ marginTop: 6 }}>
                         <Badge tone={APPT_STATUS[a.status]?.tone}>{APPT_STATUS[a.status]?.label}</Badge>

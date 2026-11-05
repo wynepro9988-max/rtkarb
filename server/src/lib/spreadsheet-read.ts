@@ -19,6 +19,11 @@ const unreadable = () => badRequest('Berkas tidak dapat dibaca. Gunakan berkas E
 
 export function readSpreadsheet(buf: Buffer): SheetGrid[] {
   if (buf.length >= 4 && buf.readUInt32LE(0) === 0x04034b50) return readXlsx(buf);
+  if (buf.length >= 5 && buf.toString('latin1', 0, 5) === '%PDF-') {
+    throw badRequest(
+      'Berkas PDF tidak dapat diimpor karena isi tabelnya tidak terbaca rapi. Bila datanya dari Google Form/Google Sheets, buka spreadsheet-nya lalu pilih File → Download → Microsoft Excel (.xlsx), kemudian impor berkas itu.',
+    );
+  }
   if (buf.length >= 8 && buf.readUInt32LE(0) === 0xe011cfd0 && buf.readUInt32LE(4) === 0xe11ab1a1) {
     // Format OLE: Excel 97–2003 (.xls) atau berkas Excel yang dikunci kata sandi.
     throw badRequest('Berkas .xls (Excel 97–2003) atau berkas berkata sandi belum didukung. Buka di Excel, lalu simpan sebagai .xlsx tanpa kata sandi.');

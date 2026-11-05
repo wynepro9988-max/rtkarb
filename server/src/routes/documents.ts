@@ -23,6 +23,8 @@ const EXT: Record<string, string> = { 'application/pdf': '.pdf', 'image/jpeg': '
 const fieldsSchema = z.object({
   title: zText(2, 150),
   category: z.enum(['administrasi', 'klinis']),
+  // Berkas pendaftaran (informed consent, KTP orang tua, KIA, foto anak) selalu berkas administrasi.
+  docType: z.enum(['informed_consent', 'ktp_ortu', 'kia', 'foto_anak']).optional(),
 });
 
 export async function documentRoutes(app: FastifyInstance) {
@@ -46,7 +48,7 @@ export async function documentRoutes(app: FastifyInstance) {
     return tenantTx(app, ctx, async (db) => {
       await requirePatient(db, ctx.orgId!, id);
       return db.many(
-        `SELECT d.id, d.category, d.title, d.original_name, d.mime_type, d.size_bytes, d.uploaded_at, u.full_name AS uploaded_by_name
+        `SELECT d.id, d.category, d.doc_type, d.title, d.original_name, d.mime_type, d.size_bytes, d.uploaded_at, u.full_name AS uploaded_by_name
            FROM patient_documents d LEFT JOIN users u ON u.id = d.uploaded_by
           WHERE d.organization_id = $1 AND d.patient_id = $2 AND d.archived_at IS NULL
           ORDER BY d.uploaded_at DESC`,
@@ -64,7 +66,9 @@ export async function documentRoutes(app: FastifyInstance) {
     const fields = parse(fieldsSchema, {
       title: (part.fields.title as { value?: unknown } | undefined)?.value,
       category: (part.fields.category as { value?: unknown } | undefined)?.value,
+      docType: (part.fields.docType as { value?: unknown } | undefined)?.value || undefined,
     });
+    if (fields.docType && fields.category !== 'administrasi') throw badRequest('Berkas pendaftaran harus berkategori administrasi');
     if (fields.category === 'klinis' && dataScopes(ctx.permissions).note === 'none') {
       throw forbidden('Anda tidak memiliki akses untuk mengunggah dokumen klinis');
     }
@@ -91,8 +95,8 @@ export async function documentRoutes(app: FastifyInstance) {
         await requirePatient(db, ctx.orgId!, patientId);
         await assertQuota(db, buf.length);
         const d = await db.one<{ id: string }>(
-          `INSERT INTO patient_documents (organization_id, patient_id, category, title, original_name, mime_type, size_bytes, storage_key, sha256, uploaded_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+          `INSERT INTO patient_documents (organization_id, patient_id, category, title, original_name, mime_type, size_bytes, storage_key, sha256, uploaded_by, doc_type)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
           [
             ctx.orgId,
             patientId,
@@ -104,9 +108,10 @@ export async function documentRoutes(app: FastifyInstance) {
             storageKey,
             createHash('sha256').update(buf).digest('hex'),
             ctx.userId,
+            fields.docType ?? null,
           ],
         );
-        await audit(db, req, ctx, { action: 'dokumen.diunggah', entityType: 'patient', entityId: patientId, meta: { dokumen_id: d.id, kategori: fields.category } });
+        await audit(db, req, ctx, { action: 'dokumen.diunggah', entityType: 'patient', entityId: patientId, meta: { dokumen_id: d.id, kategori: fields.category, jenis: fields.docType ?? null } });
         return d;
       });
       return reply.status(201).send(row);

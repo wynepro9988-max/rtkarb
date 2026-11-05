@@ -49,6 +49,29 @@ export async function api<T = any>(path: string, opts: { method?: Method; body?:
   return data as T;
 }
 
+// Unggahan dengan progres (fetch belum menyediakan progres unggah).
+export function uploadWithProgress<T = any>(path: string, form: FormData, onProgress: (fraction: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api${path}`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onerror = () => reject(new ApiError(0, 'Tidak dapat terhubung ke server. Periksa koneksi internet Anda.', 'network'));
+    xhr.onload = () => {
+      let data: any = null;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        // respons kosong / bukan JSON
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data as T);
+      else reject(new ApiError(xhr.status, data?.error?.message ?? (xhr.status === 413 ? 'Ukuran berkas melebihi batas' : 'Terjadi kesalahan'), data?.error?.code ?? 'error'));
+    };
+    xhr.send(form);
+  });
+}
+
 export const get = <T = any>(path: string) => api<T>(path);
 export const post = <T = any>(path: string, body: unknown = {}) => api<T>(path, { method: 'POST', body });
 export const put = <T = any>(path: string, body: unknown) => api<T>(path, { method: 'PUT', body });

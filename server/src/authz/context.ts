@@ -243,6 +243,7 @@ export function tenantTx<T>(app: FastifyInstance, ctx: AuthContext, fn: (db: Db)
         'app.scope_note': scopes.note,
         'app.scope_finance': scopes.finance,
         'app.scope_audit': scopes.audit,
+        'app.scope_intake': scopes.intake,
       },
     },
     fn,
@@ -270,6 +271,7 @@ function portalSettings(ctx: AuthContext) {
     'app.scope_note': 'none',
     'app.scope_finance': 'none',
     'app.scope_audit': 'none',
+    'app.scope_intake': 'none',
   };
 }
 
@@ -286,6 +288,7 @@ export function systemTenantTx<T>(app: FastifyInstance, orgId: string, fn: (db: 
         'app.scope_note': 'none',
         'app.scope_finance': 'none',
         'app.scope_audit': 'none',
+        'app.scope_intake': 'none',
       },
     },
     fn,

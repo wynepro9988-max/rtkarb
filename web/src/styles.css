@@ -384,6 +384,72 @@ a.daybar-block:hover { box-shadow: inset 0 0 0 1px var(--c-sky); }
   .import-foot .row { width: 100%; }
   .import-foot .row .btn { flex: 1; }
 }
+/* ---------- Absen sesi & media ---------- */
+.absen-row { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 22px; border-bottom: 1px solid var(--c-border); }
+.absen-row:last-child { border-bottom: none; }
+.absen-row .time { font-weight: 800; font-variant-numeric: tabular-nums; color: var(--c-primary-strong); }
+.absen-row .who { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.absen-row .who strong { overflow-wrap: anywhere; }
+.pick-list { margin-top: 6px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); max-height: 260px; overflow-y: auto; background: var(--c-surface); }
+.pick-list button {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; width: 100%; padding: 10px 14px; text-align: left;
+  border: 0; border-bottom: 1px solid var(--c-border); background: transparent; font: inherit; color: var(--c-ink); cursor: pointer;
+}
+.pick-list button:last-child { border-bottom: none; }
+.pick-list button:hover, .pick-list button:focus-visible { background: var(--c-primary-soft); }
+.pick-list .mono { grid-row: span 2; align-self: center; font-weight: 700; color: var(--c-primary-strong); }
+.media-drop {
+  display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer;
+  border: 2px dashed var(--c-border-strong); border-radius: var(--radius-sm); background: var(--c-surface-2);
+}
+.media-drop:hover { border-color: var(--c-primary); background: var(--c-primary-soft); }
+.media-drop:focus-within { outline: 3px solid var(--c-primary); outline-offset: 2px; }
+.media-drop.busy { opacity: 0.6; cursor: progress; }
+.media-drop > svg { width: 26px; height: 26px; color: var(--c-primary); flex: none; }
+.media-drop > span { display: flex; flex-direction: column; gap: 2px; }
+.upload-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.upload-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; font-size: 0.875rem; }
+.upload-list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-list progress { grid-column: 1 / -1; width: 100%; height: 6px; accent-color: var(--c-primary); }
+.upload-list li.err { color: var(--c-danger); }
+.upload-list li.err .small { grid-column: 1 / -1; }
+.upload-list li.ok { color: var(--c-success); }
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.media-item { margin: 0; border: 1px solid var(--c-border); border-radius: var(--radius-sm); overflow: hidden; background: var(--c-surface); }
+.media-item video, .media-item img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--c-night); }
+.media-item figcaption { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 8px 10px; }
+.chip.on { background: var(--c-primary); border-color: var(--c-primary); border-style: solid; color: #fff; }
+.chip.on:hover:not(:disabled) { background: var(--c-primary-strong); }
+.registration { gap: 0; }
+.reg-section { display: flex; flex-direction: column; gap: 14px; padding: 4px 0 22px; }
+.reg-section + .reg-section { padding-top: 22px; border-top: 1px solid var(--c-border); }
+.reg-section h2 { font-size: 1.05rem; }
+.intake { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--c-border); display: flex; flex-direction: column; gap: 12px; }
+.intake h3 { font-size: 1rem; }
+@media (max-width: 640px) {
+  .absen-row { grid-template-columns: 48px minmax(0, 1fr); padding: 12px 16px; }
+  .absen-row > :last-child { grid-column: 1 / -1; }
+  .absen-row > :last-child.btn, .absen-row > :last-child .btn { flex: 1; }
+}
+/* ---------- Pendaftaran online ---------- */
+.public-page { min-height: 100vh; background: var(--c-bg); padding: 24px 16px 48px; }
+.public-card { max-width: 640px; margin: 0 auto; background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px; }
+.public-head { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--c-border); }
+.public-head img { width: 72px; height: auto; border-radius: 12px; flex: none; }
+.public-head h1 { font-size: 1.4rem; line-height: 1.2; }
+.hp-field { position: absolute; left: -10000px; width: 1px; height: 1px; opacity: 0; }
+.online-reg { margin-bottom: 18px; }
+.online-link { display: flex; flex-direction: column; gap: 8px; }
+.online-list { border-top: 1px solid var(--c-border); }
+.online-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 22px; border-bottom: 1px solid var(--c-border); }
+.online-item:last-child { border-bottom: none; }
+.online-item.active { box-shadow: inset 3px 0 0 var(--c-star); background: var(--c-surface-2); }
+.online-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.online-main .small { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .public-card { padding: 18px 16px; }
+  .online-item { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; }
+}
 .note-read { display: flex; flex-direction: column; gap: 14px; margin: 0; }
 .note-read dt { color: var(--c-muted); font-weight: 600; font-size: 0.875rem; margin-bottom: 2px; }
 .note-read dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }

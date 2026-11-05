@@ -40,6 +40,12 @@ export async function dashboardRoutes(app: FastifyInstance) {
         );
       }
 
+      if (can(ctx, 'patient.manage') && scopes.intake === 'all') {
+        out.registrationsPending = (
+          await db.one<{ n: number }>(`SELECT count(*)::int AS n FROM registration_requests WHERE organization_id = $1 AND status = 'baru'`, [ctx.orgId])
+        ).n;
+      }
+
       if (scopes.patient !== 'none') {
         out.activePatients = (
           await db.one<{ count: number }>(`SELECT count(*) AS count FROM patients WHERE organization_id = $1 AND status = 'aktif'`, [ctx.orgId])
@@ -59,8 +65,8 @@ export async function dashboardRoutes(app: FastifyInstance) {
                   ${noteDeadlineSql('$2')} AS deadline, ${noteOverdueSql('$2')} AS overdue
              FROM appointments a
              JOIN patients p ON p.organization_id = a.organization_id AND p.id = a.patient_id
-             JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
-             JOIN users u ON u.id = m.user_id
+             LEFT JOIN memberships m ON m.organization_id = a.organization_id AND m.id = a.therapist_member_id
+             LEFT JOIN users u ON u.id = m.user_id
              LEFT JOIN therapy_notes n ON n.organization_id = a.organization_id AND n.appointment_id = a.id
             WHERE ${pendingWhere}
             ORDER BY a.starts_at LIMIT 20`,

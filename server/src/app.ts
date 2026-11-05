@@ -14,6 +14,7 @@ import type { Config } from './config.ts';
 import { withTx, type Pool } from './db.ts';
 import { forbidden, HttpError } from './errors.ts';
 import { createFileStore, type FileStore } from './lib/storage.ts';
+import { absenRoutes } from './routes/absen.ts';
 import { appointmentRoutes } from './routes/appointments.ts';
 import { auditLogRoutes } from './routes/audit-log.ts';
 import { authRoutes } from './routes/auth.ts';
@@ -37,6 +38,7 @@ import { privacyRoutes } from './routes/privacy.ts';
 import { programRoutes } from './routes/programs.ts';
 import { reconciliationRoutes } from './routes/reconciliation.ts';
 import { refundRoutes } from './routes/refunds.ts';
+import { registrationRoutes } from './routes/registrations.ts';
 import { reminderRoutes } from './routes/reminders.ts';
 import { whatsappRoutes } from './routes/whatsapp.ts';
 
@@ -44,7 +46,15 @@ z.config(z.locales.id());
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // Endpoint publik yang tidak memakai sesi berjalan (tetap terkena pemeriksaan Origin).
-const NO_SESSION_ROUTES = new Set(['/api/auth/login', '/api/auth/token-info', '/api/auth/accept-invitation', '/api/auth/reset-password', '/api/cron/reminders']);
+const NO_SESSION_ROUTES = new Set([
+  '/api/auth/login',
+  '/api/auth/token-info',
+  '/api/auth/accept-invitation',
+  '/api/auth/reset-password',
+  '/api/cron/reminders',
+  // Formulir pendaftaran online untuk orang tua (tanpa akun).
+  '/api/public/registration/:token',
+]);
 
 // Kode error PostgreSQL -> respons aman tanpa detail internal (nilai data tidak dikirim/dicatat).
 const PG_ERRORS: Record<string, [number, string]> = {
@@ -94,6 +104,8 @@ export async function buildApp(
         scriptSrc: ["'self'"],
         styleSrc: ["'self'"],
         imgSrc: ["'self'", 'data:', 'blob:'],
+        // blob: untuk membaca durasi video di perangkat sebelum diunggah (absen sesi).
+        mediaSrc: ["'self'", 'blob:'],
         fontSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"],
         objectSrc: ["'none'"],
@@ -179,6 +191,8 @@ export async function buildApp(
       await api.register(staffRoutes);
       await api.register(patientRoutes);
       await api.register(patientImportRoutes);
+      await api.register(absenRoutes);
+      await api.register(registrationRoutes);
       await api.register(guardianAccountRoutes);
       await api.register(portalRoutes);
       await api.register(appointmentRoutes);

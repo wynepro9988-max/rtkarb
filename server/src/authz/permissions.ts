@@ -21,11 +21,18 @@ export const PERMISSIONS = [
   'patient.read.assigned',
   'patient.manage',
   'patient.assign',
+  // Data pendaftaran klinis: keluhan awal, hasil pemeriksaan, program terapi.
+  'patient.intake',
+  'patient.intake.assigned',
   'schedule.read',
   'schedule.read.own',
   'schedule.manage',
   'session.complete',
   'session.complete.own',
+  // Absen sendiri: mencari pasien aktif lewat No. RM/nama lalu mencatat sesi yang ditangani.
+  'session.log.own',
+  // Mengunggah video/foto sesi (dilihat sesuai cakupan catatan klinis).
+  'session.media.upload',
   'session.reopen',
   'therapy.note.read',
   'therapy.note.read.assigned',
@@ -75,6 +82,7 @@ const OWNER: Permission[] = PERMISSIONS.filter(
     !p.endsWith('.assigned') &&
     !p.endsWith('.own') &&
     p !== 'session.complete.own' &&
+    p !== 'session.log.own' &&
     p !== 'portal.view',
 );
 
@@ -87,6 +95,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'patient.read',
     'patient.manage',
     'patient.assign',
+    'patient.intake',
     'schedule.read',
     'schedule.manage',
     'session.complete',
@@ -103,8 +112,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   terapis: [
     'org.read',
     'patient.read.assigned',
+    'patient.intake.assigned',
     'schedule.read.own',
     'session.complete.own',
+    'session.log.own',
+    'session.media.upload',
     'therapy.note.read.assigned',
     'therapy.note.write',
     'package.read',
@@ -160,6 +172,7 @@ export interface DataScopes {
   note: ScopeLevel;
   finance: ScopeLevel;
   audit: ScopeLevel;
+  intake: ScopeLevel;
 }
 
 export function dataScopes(perms: ReadonlySet<Permission>): DataScopes {
@@ -168,6 +181,7 @@ export function dataScopes(perms: ReadonlySet<Permission>): DataScopes {
     note: perms.has('therapy.note.read') ? 'all' : perms.has('therapy.note.read.assigned') ? 'assigned' : 'none',
     finance: perms.has('payment.read') || perms.has('expense.read') || perms.has('compensation.read') || perms.has('invoice.read') ? 'all' : 'none',
     audit: perms.has('audit.read') ? 'all' : 'none',
+    intake: perms.has('patient.intake') ? 'all' : perms.has('patient.intake.assigned') ? 'assigned' : 'none',
   };
 }
 

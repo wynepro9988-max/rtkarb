@@ -18,7 +18,9 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     title: 'Layanan',
     items: [
       { to: '/dasbor', label: 'Dasbor', icon: 'home', perms: ['org.read'] },
+      { to: '/absen', label: 'Absen Sesi', icon: 'check', perms: ['session.log.own', 'session.complete'] },
       { to: '/jadwal', label: 'Jadwal & Sesi', icon: 'calendar', perms: ['schedule.read', 'schedule.read.own'] },
+      { to: '/pendaftaran', label: 'Pasien Baru', icon: 'plus', perms: ['patient.manage'] },
       { to: '/pasien', label: 'Pasien', icon: 'users', perms: ['patient.read', 'patient.read.assigned'] },
       { to: '/pengingat', label: 'Pengingat', icon: 'bell', perms: ['reminder.send'] },
     ],
