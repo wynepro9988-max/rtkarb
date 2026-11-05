@@ -221,11 +221,24 @@ export function ReasonDialog({ title, description, confirmLabel, danger, onClose
 }
 
 // Input nominal rupiah: menampilkan pemisah ribuan, menyimpan angka bulat.
-export function MoneyInput({ id, value, onChange, required }: { id: string; value: number | ''; onChange: (v: number | '') => void; required?: boolean }) {
+export function MoneyInput({
+  id,
+  value,
+  onChange,
+  required,
+  ariaLabel,
+}: {
+  id?: string;
+  value: number | '';
+  onChange: (v: number | '') => void;
+  required?: boolean;
+  ariaLabel?: string;
+}) {
   const display = value === '' ? '' : new Intl.NumberFormat('id-ID').format(value);
   return (
     <input
       id={id}
+      aria-label={ariaLabel}
       className="input mono"
       inputMode="numeric"
       autoComplete="off"

@@ -30,7 +30,7 @@ konsisten dan dapat ditelusuri.
 |---|---|
 | `server/migrations` (3 file) | Skema 20 tabel, RLS di semua tabel bisnis, FK komposit tenant, hak per kolom, tabel append-only |
 | `server/src` | API Fastify: auth & sesi, otorisasi terpusat, 14 modul rute |
-| `server/test` (17 file) | 165 test integrasi terhadap PostgreSQL sungguhan |
+| `server/test` (18 file) | 173 test integrasi terhadap PostgreSQL sungguhan |
 | `server/scripts` | migrasi berchecksum, CLI administrasi platform, seeder DEMO (khusus `*_dev`) |
 | `web/src` | 17 halaman React berbahasa Indonesia, responsif, dan dapat dicetak (kuitansi) |
 | `android/` | Aplikasi Android native (Java, WebView aman, tanpa dependensi pihak ketiga) |
@@ -48,7 +48,7 @@ Server PostgreSQL lain di mesin ini (port 5432) **tidak disentuh**.
 
 ## 5. Test yang dijalankan & hasil
 
-`npm test`: **17 file, 165 test, 165 lulus, 0 gagal** (run terakhir 5 Nov 2026).
+`npm test`: **18 file, 173 test, 173 lulus, 0 gagal** (run terakhir 5 Nov 2026).
 Test memakai data sintetis (label DEMO, email `.invalid`).
 
 | File | Jumlah | Cakupan (acceptance criteria §13 master prompt) |
@@ -433,4 +433,25 @@ dan tunjangan bisa ditambah sesuai kebutuhan.
 **Bukti:** 7 test baru (`compensation-fixed.test.ts`), total 165 lulus. Uji mutasi: mengabaikan
 bulan akhir menggagalkan 3 test; membuka RLS komponen menggagalkan 1 test. Diperiksa di browser
 dengan data DEMO lokal (dihapus lagi).
+
+## 22. Skema honor diatur sekaligus (5 Nov 2026)
+
+**Permintaan owner:** pengaturan gaji dibuat lebih praktis, boleh dibangun ulang.
+
+- Tab *Skema honor* kini satu kartu per terapis: jenis skema, gaji pokok, tunjangan, total tetap
+  per bulan, honor per sesi, dan tarif khusus per layanan, dengan tombol **Atur skema**.
+- Satu formulir: pilih jenis (hanya per sesi / gaji + tunjangan + per sesi / gaji + tunjangan saja),
+  tombol cepat tunjangan (transport, makan, jabatan, kehadiran, komunikasi, lainnya), tarif khusus
+  per layanan, bulan berlaku, dan **salin dari terapis lain**. Riwayat lengkap tetap ada (dilipat).
+- `PUT /compensation/schemes/:memberId` menyimpan sekaligus dalam satu transaksi: yang sama
+  dibiarkan; yang berubah diakhiri di akhir bulan sebelumnya; yang baru dibuat untuk bulan itu dan
+  belum dibayar/dipakai diganti (koreksi tidak menumpuk). Bulan yang sudah dibayar dan tarif yang
+  sudah dipakai menghitung honor ditolak dengan pesan jelas. Honor sesi yang sudah dihitung tidak
+  dihitung ulang. `GET /compensation/schemes?month=` menampilkan skema yang berlaku.
+- Migrasi `011`: hak DELETE (beserta kebijakan RLS keuangan) untuk komponen dan aturan; baris yang
+  sudah dibayar atau dipakai tetap terlindungi foreign key.
+
+**Bukti:** 8 test baru (`compensation-scheme.test.ts`), total 173 lulus. Uji mutasi: melepas
+perlindungan bulan dibayar menggagalkan 1 test; menyimpan ulang selalu membuat baris baru
+menggagalkan 3 test. Diperiksa di browser (laptop dan HP) dengan data DEMO lokal (dihapus lagi).
 

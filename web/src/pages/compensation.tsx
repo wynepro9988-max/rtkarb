@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { post, qs, useApi } from '../api.ts';
+import { post, put, qs, useApi } from '../api.ts';
 import { useAuth } from '../auth.tsx';
 import { formatDate, formatMonth, formatRupiah, monthRange, todayIn } from '../format.ts';
 import { Badge, Dialog, Empty, ErrorBox, Field, Icon, Loading, MoneyInput, PageHeader, Tabs, useSubmit, useToast } from '../ui.tsx';
@@ -60,10 +60,7 @@ export function CompensationPage() {
           </div>
         </>
       ) : (
-        <div className="stack">
-          <FixedComponents />
-          <Rules />
-        </div>
+        <SchemesTab />
       )}
     </>
   );
@@ -201,172 +198,6 @@ function MonthlyRecap({ month }: { month: string }) {
   );
 }
 
-function FixedComponents() {
-  const { can } = useAuth();
-  const { data, error, loading, reload } = useApi<any[]>('/compensation/components');
-  const [creating, setCreating] = useState(false);
-  const [ending, setEnding] = useState<any | null>(null);
-  const manage = can('compensation.manage');
-  return (
-    <section className="card">
-      <div className="card-head">
-        <h2>Gaji pokok & tunjangan (bulanan)</h2>
-        {manage ? (
-          <button className="btn btn-sm" onClick={() => setCreating(true)}>
-            <Icon name="plus" /> Tambah komponen
-          </button>
-        ) : null}
-      </div>
-      <p className="card-body small muted" style={{ paddingBottom: 0 }}>
-        Untuk terapis bergaji tetap. Tunjangan bisa ditambah sebanyak yang dibutuhkan, misalnya transport, makan, atau jabatan. Terapis yang hanya dibayar per sesi tidak
-        perlu komponen di sini. Nominal dihitung penuh per bulan berlaku, tanpa prorata atau potongan.
-      </p>
-      {loading && !data ? <Loading /> : null}
-      <ErrorBox error={error} />
-      {data?.length === 0 ? <Empty title="Belum ada gaji pokok atau tunjangan" /> : null}
-      {data?.length ? (
-        <div className="table-wrap">
-          <table className="table responsive">
-            <thead>
-              <tr>
-                <th>Terapis</th>
-                <th>Komponen</th>
-                <th className="num">Per bulan</th>
-                <th>Berlaku</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((c) => (
-                <tr key={c.id}>
-                  <td data-label="Terapis">{c.therapistName}</td>
-                  <td data-label="Komponen">
-                    <ComponentName name={c.name} kind={c.kind} />
-                  </td>
-                  <td data-label="Per bulan" className="num">
-                    {formatRupiah(c.amount)}
-                  </td>
-                  <td data-label="Berlaku">
-                    {formatMonth(c.startMonth)} – {c.endMonth ? formatMonth(c.endMonth) : 'sekarang'}
-                  </td>
-                  <td>
-                    {manage && !c.endMonth ? (
-                      <button className="btn btn-sm btn-ghost" onClick={() => setEnding(c)}>
-                        Akhiri
-                      </button>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-      {creating ? <ComponentDialog onClose={() => setCreating(false)} onSaved={reload} /> : null}
-      {ending ? <EndComponentDialog component={ending} onClose={() => setEnding(null)} onSaved={reload} /> : null}
-    </section>
-  );
-}
-
-function ComponentDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const { me } = useAuth();
-  const { data: therapists } = useApi<any[]>('/staff/therapists');
-  const [f, setF] = useState({
-    memberId: '',
-    kind: 'gaji_pokok',
-    name: 'Gaji pokok',
-    amount: '' as number | '',
-    startMonth: todayIn(me?.organization?.timezone).slice(0, 7),
-    endMonth: '',
-    notes: '',
-  });
-  const { busy, error, submit } = useSubmit(
-    () => post('/compensation/components', { ...f, amount: f.amount || 0, endMonth: f.endMonth || null, notes: f.notes || null }),
-    () => {
-      onSaved();
-      onClose();
-    },
-  );
-  const setKind = (kind: string) => setF({ ...f, kind, name: kind === 'gaji_pokok' ? 'Gaji pokok' : f.name === 'Gaji pokok' ? '' : f.name });
-  return (
-    <Dialog title="Tambah gaji pokok / tunjangan" onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <div className="form-grid">
-          <Field label="Terapis" full>
-            {(id) => (
-              <select id={id} className="select" value={f.memberId} onChange={(e) => setF({ ...f, memberId: e.target.value })} required>
-                <option value="">Pilih terapis…</option>
-                {therapists?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.fullName}
-                  </option>
-                ))}
-              </select>
-            )}
-          </Field>
-          <Field label="Jenis">
-            {(id) => (
-              <select id={id} className="select" value={f.kind} onChange={(e) => setKind(e.target.value)}>
-                <option value="gaji_pokok">Gaji pokok</option>
-                <option value="tunjangan">Tunjangan</option>
-              </select>
-            )}
-          </Field>
-          <Field label="Nama komponen" hint={f.kind === 'tunjangan' ? 'Mis. Tunjangan transport, Tunjangan makan' : undefined}>
-            {(id) => <input id={id} className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required minLength={2} maxLength={80} />}
-          </Field>
-          <Field label="Nominal per bulan (Rp)">{(id) => <MoneyInput id={id} value={f.amount} onChange={(v) => setF({ ...f, amount: v })} required />}</Field>
-          <Field label="Berlaku mulai bulan">
-            {(id) => <input id={id} className="input" type="month" value={f.startMonth} onChange={(e) => setF({ ...f, startMonth: e.target.value })} required />}
-          </Field>
-          <Field label="Sampai bulan" hint="Kosongkan bila masih berlaku">
-            {(id) => <input id={id} className="input" type="month" value={f.endMonth} min={f.startMonth} onChange={(e) => setF({ ...f, endMonth: e.target.value })} />}
-          </Field>
-          <Field label="Catatan" hint="Mis. nomor kontrak" full>
-            {(id) => <input id={id} className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} maxLength={500} />}
-          </Field>
-        </div>
-        <ErrorBox error={error} />
-        <div className="form-actions">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Batal
-          </button>
-          <button className="btn" disabled={busy}>
-            Simpan
-          </button>
-        </div>
-      </form>
-    </Dialog>
-  );
-}
-
-function EndComponentDialog({ component, onClose, onSaved }: { component: any; onClose: () => void; onSaved: () => void }) {
-  const { me } = useAuth();
-  const [month, setMonth] = useState(todayIn(me?.organization?.timezone).slice(0, 7));
-  const { busy, error, submit } = useSubmit(() => post(`/compensation/components/${component.id}/end`, { endMonth: month }), () => {
-    onSaved();
-    onClose();
-  });
-  return (
-    <Dialog title={`Akhiri ${component.name} — ${component.therapistName}`} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <Field label="Berlaku sampai bulan" hint="Bulan terakhir komponen ini masih dibayarkan">
-          {(id) => <input id={id} className="input" type="month" value={month} min={component.lastPaidMonth ?? component.startMonth} onChange={(e) => setMonth(e.target.value)} required />}
-        </Field>
-        <ErrorBox error={error} />
-        <div className="form-actions">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Batal
-          </button>
-          <button className="btn" disabled={busy}>
-            Simpan
-          </button>
-        </div>
-      </form>
-    </Dialog>
-  );
-}
-
 function Recap({ range }: { range: { from: string; to: string } }) {
   const { can, me } = useAuth();
   const toast = useToast();
@@ -463,54 +294,426 @@ function Recap({ range }: { range: { from: string; to: string } }) {
   );
 }
 
-function Rules() {
-  const { can } = useAuth();
-  const { data, error, loading, reload } = useApi<any[]>('/compensation/rules');
-  const [creating, setCreating] = useState(false);
-  const [ending, setEnding] = useState<any | null>(null);
+// ---------------------------------------------------------------------------
+// Skema honor: satu kartu per terapis, diatur sekaligus lewat satu formulir.
+// ---------------------------------------------------------------------------
+
+type RateScheme = 'tetap_per_sesi' | 'persen_tarif';
+interface Rate {
+  scheme: RateScheme;
+  amount: number | null;
+  percent: number | string | null;
+}
+interface Scheme {
+  memberId: string;
+  fullName: string;
+  specialization: string | null;
+  active: boolean;
+  baseSalary: number | null;
+  allowances: { name: string; amount: number }[];
+  perSession: Rate | null;
+  serviceRates: (Rate & { serviceId: string; serviceName: string })[];
+  upcomingMonth: string | null;
+}
+
+const rateText = (r: Rate) => (r.scheme === 'tetap_per_sesi' ? `${formatRupiah(r.amount)} per sesi` : `${Number(r.percent)}% dari tarif sesi`);
+const ALLOWANCE_PRESETS = ['Tunjangan transport', 'Tunjangan makan', 'Tunjangan jabatan', 'Tunjangan kehadiran', 'Tunjangan komunikasi'];
+
+const schemeFlags = (s: Scheme) => ({
+  hasBaseSalary: Boolean(s.baseSalary),
+  hasAllowance: s.allowances.length > 0,
+  hasPerSession: Boolean(s.perSession) || s.serviceRates.length > 0,
+});
+
+function SchemesTab() {
+  const { can, me } = useAuth();
+  const [month, setMonth] = useState(() => todayIn(me?.organization?.timezone).slice(0, 7));
+  const { data, error, loading, reload } = useApi<Scheme[]>(`/compensation/schemes${qs({ month })}`);
+  const [editing, setEditing] = useState<Scheme | null>(null);
+  const manage = can('compensation.manage');
   return (
-    <section className="card">
+    <div className="stack">
+      <div className="row">
+        <Field label="Skema yang berlaku pada bulan">
+          {(id) => <input id={id} className="input" type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />}
+        </Field>
+      </div>
+      {loading && !data ? <Loading /> : null}
+      <ErrorBox error={error} />
+      {data?.length === 0 ? (
+        <div className="card">
+          <Empty title="Belum ada terapis">Tandai staf sebagai terapis di menu Staf, lalu atur skemanya di sini.</Empty>
+        </div>
+      ) : null}
+      {data?.length ? (
+        <div className="grid grid-2">
+          {data.map((s) => (
+            <SchemeCard key={s.memberId} scheme={s} manage={manage} onEdit={() => setEditing(s)} />
+          ))}
+        </div>
+      ) : null}
+      {can('compensation.read') ? <SchemeHistory /> : null}
+      {editing && data ? <SchemeDialog scheme={editing} all={data} onClose={() => setEditing(null)} onSaved={reload} /> : null}
+    </div>
+  );
+}
+
+function SchemeCard({ scheme: s, manage, onEdit }: { scheme: Scheme; manage: boolean; onEdit: () => void }) {
+  const label = schemeLabel(schemeFlags(s));
+  const fixed = Number(s.baseSalary ?? 0) + s.allowances.reduce((n, a) => n + Number(a.amount), 0);
+  return (
+    <article className="card">
       <div className="card-head">
-        <h2>Honor per sesi</h2>
-        {can('compensation.manage') ? (
-          <button className="btn btn-sm" onClick={() => setCreating(true)}>
-            <Icon name="plus" /> Aturan per sesi
+        <div>
+          <h2>{s.fullName}</h2>
+          <p className="small muted">{[s.specialization, s.active ? null : 'nonaktif'].filter(Boolean).join(', ') || 'Terapis'}</p>
+        </div>
+        {manage ? (
+          <button className="btn btn-sm btn-secondary" onClick={onEdit}>
+            Atur skema
           </button>
         ) : null}
       </div>
-      <p className="card-body small muted" style={{ paddingBottom: 0 }}>
-        Dihitung otomatis saat sesi ditandai selesai: nominal tetap atau persentase dari tarif. Bisa berdiri sendiri (hanya per sesi) atau ditambahkan di atas gaji pokok. Aturan khusus layanan diutamakan di atas aturan umum. Perubahan tarif dilakukan dengan mengakhiri aturan lama dan membuat aturan baru.
-      </p>
-      {loading && !data ? <Loading /> : null}
-      <ErrorBox error={error} />
-      {data?.length === 0 ? <Empty title="Belum ada aturan honor per sesi" /> : null}
-      {data?.length ? (
+      <div className="card-body stack" style={{ gap: 12 }}>
+        <div>
+          <Badge tone={label === 'Belum diatur' ? 'warn' : 'info'}>{label}</Badge>
+        </div>
+        {label === 'Belum diatur' ? (
+          <p className="small muted">Honor terapis ini belum dihitung oleh sistem.</p>
+        ) : (
+          <dl className="scheme-lines">
+            {s.baseSalary ? (
+              <div>
+                <dt>Gaji pokok</dt>
+                <dd>{formatRupiah(s.baseSalary)}</dd>
+              </div>
+            ) : null}
+            {s.allowances.map((a) => (
+              <div key={a.name}>
+                <dt>{a.name}</dt>
+                <dd>{formatRupiah(a.amount)}</dd>
+              </div>
+            ))}
+            {fixed ? (
+              <div className="scheme-total">
+                <dt>Tetap per bulan</dt>
+                <dd>{formatRupiah(fixed)}</dd>
+              </div>
+            ) : null}
+            {s.perSession ? (
+              <div>
+                <dt>Honor per sesi</dt>
+                <dd>{rateText(s.perSession)}</dd>
+              </div>
+            ) : null}
+            {s.serviceRates.map((r) => (
+              <div key={r.serviceId}>
+                <dt>{r.serviceName}</dt>
+                <dd>{rateText(r)}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {s.upcomingMonth ? <p className="small muted">Ada perubahan terjadwal mulai {formatMonth(s.upcomingMonth)}.</p> : null}
+      </div>
+    </article>
+  );
+}
+
+type SchemeKind = 'per_sesi' | 'gaji_per_sesi' | 'gaji';
+const SCHEME_KINDS: { value: SchemeKind; label: string }[] = [
+  { value: 'per_sesi', label: 'Hanya per sesi' },
+  { value: 'gaji_per_sesi', label: 'Gaji + tunjangan + per sesi' },
+  { value: 'gaji', label: 'Gaji + tunjangan saja' },
+];
+
+interface RateForm {
+  scheme: RateScheme;
+  amount: number | '';
+  percent: string;
+}
+interface SchemeForm {
+  kind: SchemeKind;
+  baseSalary: number | '';
+  allowances: { name: string; amount: number | '' }[];
+  perSession: RateForm;
+  serviceRates: (RateForm & { serviceId: string })[];
+}
+
+const rateForm = (r: Rate | null): RateForm => ({
+  scheme: r?.scheme ?? 'tetap_per_sesi',
+  amount: r?.amount ?? '',
+  percent: r?.percent != null ? String(Number(r.percent)) : '',
+});
+const rateBody = (r: RateForm) => (r.scheme === 'tetap_per_sesi' ? { scheme: r.scheme, amount: r.amount || 0 } : { scheme: r.scheme, percent: Number(r.percent) });
+
+function toForm(s: Scheme): SchemeForm {
+  const { hasBaseSalary, hasAllowance, hasPerSession } = schemeFlags(s);
+  const fixed = hasBaseSalary || hasAllowance;
+  return {
+    kind: fixed ? (hasPerSession ? 'gaji_per_sesi' : 'gaji') : 'per_sesi',
+    baseSalary: s.baseSalary ?? '',
+    allowances: s.allowances.map((a) => ({ name: a.name, amount: Number(a.amount) })),
+    perSession: rateForm(s.perSession),
+    serviceRates: s.serviceRates.map((r) => ({ ...rateForm(r), serviceId: r.serviceId })),
+  };
+}
+
+function RateInputs({ value, onChange, label }: { value: RateForm; onChange: (v: RateForm) => void; label: string }) {
+  return (
+    <>
+      <select className="select" aria-label={`Cara hitung ${label}`} value={value.scheme} onChange={(e) => onChange({ ...value, scheme: e.target.value as RateScheme })}>
+        <option value="tetap_per_sesi">Nominal per sesi</option>
+        <option value="persen_tarif">Persen dari tarif</option>
+      </select>
+      {value.scheme === 'tetap_per_sesi' ? (
+        <MoneyInput ariaLabel={`Nominal ${label}`} value={value.amount} onChange={(v) => onChange({ ...value, amount: v })} required />
+      ) : (
+        <input
+          className="input"
+          aria-label={`Persen ${label}`}
+          type="number"
+          min={0.01}
+          max={100}
+          step={0.01}
+          placeholder="%"
+          value={value.percent}
+          onChange={(e) => onChange({ ...value, percent: e.target.value })}
+          required
+        />
+      )}
+    </>
+  );
+}
+
+function SchemeDialog({ scheme, all, onClose, onSaved }: { scheme: Scheme; all: Scheme[]; onClose: () => void; onSaved: () => void }) {
+  const { me } = useAuth();
+  const toast = useToast();
+  const { data: services } = useApi<{ id: string; name: string; active: boolean }[]>('/services');
+  const [f, setF] = useState<SchemeForm>(() => toForm(scheme));
+  const [effectiveMonth, setEffectiveMonth] = useState(() => todayIn(me?.organization?.timezone).slice(0, 7));
+  const withFixed = f.kind !== 'per_sesi';
+  const withPerSession = f.kind !== 'gaji';
+  const others = all.filter((s) => s.memberId !== scheme.memberId && schemeLabel(schemeFlags(s)) !== 'Belum diatur');
+  const fixedTotal = withFixed ? Number(f.baseSalary || 0) + f.allowances.reduce((n, a) => n + Number(a.amount || 0), 0) : 0;
+  const usedServices = new Set(f.serviceRates.map((r) => r.serviceId));
+
+  const { busy, error, submit } = useSubmit(
+    () =>
+      put(`/compensation/schemes/${scheme.memberId}`, {
+        effectiveMonth,
+        baseSalary: withFixed && f.baseSalary ? f.baseSalary : null,
+        allowances: withFixed ? f.allowances.filter((a) => a.name.trim()).map((a) => ({ name: a.name.trim(), amount: a.amount || 0 })) : [],
+        perSession: withPerSession ? rateBody(f.perSession) : null,
+        serviceRates: withPerSession ? f.serviceRates.filter((r) => r.serviceId).map((r) => ({ serviceId: r.serviceId, ...rateBody(r) })) : [],
+      }),
+    () => {
+      toast(`Skema ${scheme.fullName} disimpan, berlaku mulai ${formatMonth(effectiveMonth)}`);
+      onSaved();
+      onClose();
+    },
+  );
+
+  const setAllowance = (i: number, patchValue: Partial<SchemeForm['allowances'][number]>) =>
+    setF({ ...f, allowances: f.allowances.map((a, j) => (j === i ? { ...a, ...patchValue } : a)) });
+  const setServiceRate = (i: number, value: SchemeForm['serviceRates'][number]) => setF({ ...f, serviceRates: f.serviceRates.map((r, j) => (j === i ? value : r)) });
+  const hasAllowance = (name: string) => f.allowances.some((a) => a.name.trim().toLowerCase() === name.toLowerCase());
+
+  return (
+    <Dialog title={`Skema honor — ${scheme.fullName}`} onClose={onClose} wide>
+      <form className="form" onSubmit={submit}>
+        {others.length ? (
+          <Field label="Salin dari terapis lain" hint="Opsional. Mengisi formulir dengan skema terapis lain, lalu bisa diubah.">
+            {(id) => (
+              <select
+                id={id}
+                className="select"
+                value=""
+                onChange={(e) => {
+                  const src = others.find((s) => s.memberId === e.target.value);
+                  if (src) setF(toForm(src));
+                }}
+              >
+                <option value="">Pilih terapis…</option>
+                {others.map((s) => (
+                  <option key={s.memberId} value={s.memberId}>
+                    {s.fullName} ({schemeLabel(schemeFlags(s))})
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        ) : null}
+
+        <div className="field">
+          <span className="label">Jenis skema</span>
+          <div className="segmented" role="group" aria-label="Jenis skema">
+            {SCHEME_KINDS.map((k) => (
+              <button key={k.value} type="button" aria-pressed={f.kind === k.value} onClick={() => setF({ ...f, kind: k.value })}>
+                {k.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {withFixed ? (
+          <section className="scheme-section">
+            <h3>Gaji pokok & tunjangan per bulan</h3>
+            <Field label="Gaji pokok (Rp)" hint="Kosongkan bila hanya tunjangan">
+              {(id) => <MoneyInput id={id} value={f.baseSalary} onChange={(v) => setF({ ...f, baseSalary: v })} />}
+            </Field>
+            <div className="line-rows">
+              {f.allowances.map((a, i) => (
+                <div key={i} className="line-row">
+                  <input className="input" aria-label="Nama tunjangan" placeholder="Nama tunjangan" value={a.name} onChange={(e) => setAllowance(i, { name: e.target.value })} required minLength={2} maxLength={80} />
+                  <MoneyInput ariaLabel={`Nominal ${a.name || 'tunjangan'}`} value={a.amount} onChange={(v) => setAllowance(i, { amount: v })} required />
+                  <button type="button" className="icon-btn" aria-label={`Hapus ${a.name || 'tunjangan'}`} onClick={() => setF({ ...f, allowances: f.allowances.filter((_, j) => j !== i) })}>
+                    <Icon name="x" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="chips" aria-label="Tambah tunjangan">
+              {ALLOWANCE_PRESETS.map((name) => (
+                <button key={name} type="button" className="chip" disabled={hasAllowance(name)} onClick={() => setF({ ...f, allowances: [...f.allowances, { name, amount: '' }] })}>
+                  + {name.replace('Tunjangan ', '')}
+                </button>
+              ))}
+              <button type="button" className="chip" onClick={() => setF({ ...f, allowances: [...f.allowances, { name: '', amount: '' }] })}>
+                + Tunjangan lain
+              </button>
+            </div>
+          </section>
+        ) : null}
+
+        {withPerSession ? (
+          <section className="scheme-section">
+            <h3>Honor per sesi</h3>
+            <div className="line-row rate-row">
+              <span className="small muted">Semua layanan</span>
+              <RateInputs label="honor per sesi" value={f.perSession} onChange={(v) => setF({ ...f, perSession: v })} />
+            </div>
+            {f.serviceRates.map((r, i) => (
+              <div key={i} className="line-row rate-row">
+                <select className="select" aria-label="Layanan" value={r.serviceId} onChange={(e) => setServiceRate(i, { ...r, serviceId: e.target.value })} required>
+                  <option value="">Pilih layanan…</option>
+                  {services
+                    ?.filter((s) => s.id === r.serviceId || (s.active && !usedServices.has(s.id)))
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                </select>
+                <RateInputs label="tarif khusus" value={r} onChange={(v) => setServiceRate(i, { ...v, serviceId: r.serviceId })} />
+                <button type="button" className="icon-btn" aria-label="Hapus tarif khusus" onClick={() => setF({ ...f, serviceRates: f.serviceRates.filter((_, j) => j !== i) })}>
+                  <Icon name="x" />
+                </button>
+              </div>
+            ))}
+            <div className="chips">
+              <button
+                type="button"
+                className="chip"
+                disabled={!services || services.filter((s) => s.active).length <= usedServices.size}
+                onClick={() => setF({ ...f, serviceRates: [...f.serviceRates, { serviceId: '', scheme: 'tetap_per_sesi', amount: '', percent: '' }] })}
+              >
+                + Tarif khusus untuk layanan tertentu
+              </button>
+            </div>
+          </section>
+        ) : null}
+
+        <section className="scheme-section">
+          <Field label="Berlaku mulai bulan" hint="Bulan sebelumnya tidak berubah. Honor sesi yang sudah dihitung tidak dihitung ulang.">
+            {(id) => <input id={id} className="input" type="month" value={effectiveMonth} onChange={(e) => e.target.value && setEffectiveMonth(e.target.value)} required />}
+          </Field>
+          <dl className="scheme-lines">
+            {withFixed ? (
+              <div className="scheme-total">
+                <dt>Tetap per bulan</dt>
+                <dd>{formatRupiah(fixedTotal)}</dd>
+              </div>
+            ) : null}
+            {withPerSession ? (
+              <div>
+                <dt>Ditambah honor per sesi</dt>
+                <dd>
+                  {f.perSession.scheme === 'tetap_per_sesi'
+                    ? f.perSession.amount
+                      ? `${formatRupiah(f.perSession.amount)} per sesi`
+                      : '—'
+                    : f.perSession.percent
+                      ? `${f.perSession.percent}% dari tarif`
+                      : '—'}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+        </section>
+
+        <ErrorBox error={error} />
+        <div className="form-actions">
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            Batal
+          </button>
+          <button className="btn" disabled={busy}>
+            {busy ? 'Menyimpan…' : 'Simpan skema'}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+// Riwayat lengkap komponen & aturan (termasuk yang sudah berakhir), untuk penelusuran.
+function SchemeHistory() {
+  const [open, setOpen] = useState(false);
+  const { data: components } = useApi<any[]>(open ? '/compensation/components' : null);
+  const { data: rules } = useApi<any[]>(open ? '/compensation/rules' : null);
+  return (
+    <details className="card scheme-history" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="card-head">
+        <h2>Riwayat skema</h2>
+      </summary>
+      {open && (!components || !rules) ? <Loading /> : null}
+      {components && rules ? (
         <div className="table-wrap">
           <table className="table responsive">
             <thead>
               <tr>
                 <th>Terapis</th>
-                <th>Layanan</th>
-                <th>Skema</th>
+                <th>Komponen</th>
+                <th className="num">Nilai</th>
                 <th>Berlaku</th>
-                <th />
               </tr>
             </thead>
             <tbody>
-              {data.map((r) => (
+              {components.map((c) => (
+                <tr key={c.id}>
+                  <td data-label="Terapis">{c.therapistName}</td>
+                  <td data-label="Komponen">
+                    <ComponentName name={c.name} kind={c.kind} />
+                  </td>
+                  <td data-label="Nilai" className="num">
+                    {formatRupiah(c.amount)} / bulan
+                  </td>
+                  <td data-label="Berlaku">
+                    {formatMonth(c.startMonth)} – {c.endMonth ? formatMonth(c.endMonth) : 'sekarang'}
+                  </td>
+                </tr>
+              ))}
+              {rules.map((r) => (
                 <tr key={r.id}>
                   <td data-label="Terapis">{r.therapistName}</td>
-                  <td data-label="Layanan">{r.serviceName ?? 'Semua layanan'}</td>
-                  <td data-label="Skema">{r.scheme === 'tetap_per_sesi' ? `${formatRupiah(r.amount)} per sesi` : `${r.percent}% dari tarif`}</td>
+                  <td data-label="Komponen">
+                    Honor per sesi <span className="muted small">{r.serviceName ?? 'semua layanan'}</span>
+                  </td>
+                  <td data-label="Nilai" className="num">
+                    {rateText(r)}
+                  </td>
                   <td data-label="Berlaku">
                     {formatDate(r.effectiveFrom)} – {r.effectiveTo ? formatDate(r.effectiveTo) : 'sekarang'}
-                  </td>
-                  <td>
-                    {can('compensation.manage') && !r.effectiveTo ? (
-                      <button className="btn btn-sm btn-ghost" onClick={() => setEnding(r)}>
-                        Akhiri
-                      </button>
-                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -518,116 +721,6 @@ function Rules() {
           </table>
         </div>
       ) : null}
-      {creating ? <RuleDialog onClose={() => setCreating(false)} onSaved={reload} /> : null}
-      {ending ? <EndRuleDialog rule={ending} onClose={() => setEnding(null)} onSaved={reload} /> : null}
-    </section>
-  );
-}
-
-function RuleDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const { me } = useAuth();
-  const { data: therapists } = useApi<any[]>('/staff/therapists');
-  const { data: services } = useApi<any[]>('/services');
-  const [f, setF] = useState({ memberId: '', serviceId: '', scheme: 'tetap_per_sesi', amount: '' as number | '', percent: '', effectiveFrom: todayIn(me?.organization?.timezone), notes: '' });
-  const { busy, error, submit } = useSubmit(
-    () =>
-      post('/compensation/rules', {
-        memberId: f.memberId,
-        serviceId: f.serviceId || null,
-        scheme: f.scheme,
-        amount: f.scheme === 'tetap_per_sesi' ? f.amount || 0 : null,
-        percent: f.scheme === 'persen_tarif' ? Number(f.percent) : null,
-        effectiveFrom: f.effectiveFrom,
-        notes: f.notes || null,
-      }),
-    () => {
-      onSaved();
-      onClose();
-    },
-  );
-  return (
-    <Dialog title="Aturan honor per sesi" onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <div className="form-grid">
-          <Field label="Terapis" full>
-            {(id) => (
-              <select id={id} className="select" value={f.memberId} onChange={(e) => setF({ ...f, memberId: e.target.value })} required>
-                <option value="">Pilih terapis…</option>
-                {therapists?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.fullName}
-                  </option>
-                ))}
-              </select>
-            )}
-          </Field>
-          <Field label="Layanan" full>
-            {(id) => (
-              <select id={id} className="select" value={f.serviceId} onChange={(e) => setF({ ...f, serviceId: e.target.value })}>
-                <option value="">Semua layanan</option>
-                {services?.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            )}
-          </Field>
-          <Field label="Skema">
-            {(id) => (
-              <select id={id} className="select" value={f.scheme} onChange={(e) => setF({ ...f, scheme: e.target.value })}>
-                <option value="tetap_per_sesi">Nominal tetap per sesi</option>
-                <option value="persen_tarif">Persentase dari tarif sesi</option>
-              </select>
-            )}
-          </Field>
-          {f.scheme === 'tetap_per_sesi' ? (
-            <Field label="Nominal per sesi (Rp)">{(id) => <MoneyInput id={id} value={f.amount} onChange={(v) => setF({ ...f, amount: v })} required />}</Field>
-          ) : (
-            <Field label="Persentase (%)" hint="Untuk sesi paket, dasar tarif = harga paket ÷ jumlah sesi">
-              {(id) => <input id={id} className="input" type="number" min={0.01} max={100} step={0.01} value={f.percent} onChange={(e) => setF({ ...f, percent: e.target.value })} required />}
-            </Field>
-          )}
-          <Field label="Berlaku mulai">{(id) => <input id={id} className="input" type="date" value={f.effectiveFrom} onChange={(e) => setF({ ...f, effectiveFrom: e.target.value })} required />}</Field>
-          <Field label="Catatan" hint="Mis. nomor kontrak" full>
-            {(id) => <input id={id} className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} maxLength={500} />}
-          </Field>
-        </div>
-        <ErrorBox error={error} />
-        <div className="form-actions">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Batal
-          </button>
-          <button className="btn" disabled={busy}>
-            Simpan
-          </button>
-        </div>
-      </form>
-    </Dialog>
-  );
-}
-
-function EndRuleDialog({ rule, onClose, onSaved }: { rule: any; onClose: () => void; onSaved: () => void }) {
-  const { me } = useAuth();
-  const [date, setDate] = useState(todayIn(me?.organization?.timezone));
-  const { busy, error, submit } = useSubmit(() => post(`/compensation/rules/${rule.id}/end`, { effectiveTo: date }), () => {
-    onSaved();
-    onClose();
-  });
-  return (
-    <Dialog title={`Akhiri aturan — ${rule.therapistName}`} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <Field label="Berlaku sampai">{(id) => <input id={id} className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />}</Field>
-        <ErrorBox error={error} />
-        <div className="form-actions">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Batal
-          </button>
-          <button className="btn" disabled={busy}>
-            Simpan
-          </button>
-        </div>
-      </form>
-    </Dialog>
+    </details>
   );
 }

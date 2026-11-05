@@ -18,6 +18,7 @@ import { appointmentRoutes } from './routes/appointments.ts';
 import { auditLogRoutes } from './routes/audit-log.ts';
 import { authRoutes } from './routes/auth.ts';
 import { compensationRoutes } from './routes/compensation.ts';
+import { compensationSchemeRoutes } from './routes/compensation-schemes.ts';
 import { dashboardRoutes } from './routes/dashboard.ts';
 import { documentRoutes } from './routes/documents.ts';
 import { financeRoutes } from './routes/finance.ts';
@@ -183,6 +184,7 @@ export async function buildApp(
       await api.register(packageRoutes);
       await api.register(financeRoutes);
       await api.register(compensationRoutes);
+      await api.register(compensationSchemeRoutes);
       await api.register(reportRoutes);
       await api.register(dashboardRoutes);
       await api.register(documentRoutes);
