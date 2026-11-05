@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "npm ci --include=dev",
-  "buildCommand": "npm run build:vercel"
+  "installCommand": "echo tanpa-dependensi",
+  "buildCommand": "node scripts/vercel-redirect.mjs"
 }

@@ -5,9 +5,10 @@ Target deployment yang direncanakan pemilik proyek: kode di **Git**, aplikasi di
 resmi kedua layanan (dibaca dari situs resminya pada 29 Okt 2026), cara aplikasi dijaga
 agar tidak melewatinya, dan langkah setup.
 
-> **Status:** belum di-deploy. Bundle Vercel sudah dibuat dan dijalankan secara lokal
-> terhadap PostgreSQL lokal. Koneksi ke Supabase sungguhan dan deployment Vercel belum
-> diuji.
+> **Status (5 Nov 2026): Vercel dinonaktifkan.** Aplikasi pindah ke VPS (`https://rumahbintang.my.id`,
+> lihat [05-deployment](05-deployment.md)). `vercel.json` kini hanya membangun pengalihan permanen
+> (`scripts/vercel-redirect.mjs`) dari semua alamat lama ke domain baru. Dokumen ini disimpan
+> sebagai prosedur bila kelak kembali ke Vercel + Supabase.
 
 ## 1. Hal penting sebelum mulai
 
