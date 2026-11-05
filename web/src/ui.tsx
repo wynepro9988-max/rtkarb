@@ -26,6 +26,7 @@ const paths: Record<string, string> = {
   plus: 'M12 5v14m-7-7h14',
   back: 'M15 18l-6-6 6-6',
   download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-5 5 5 5-5m-5 5V3',
+  upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m14-7-5-5-5 5m5-5v12',
   print: 'M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z',
   check: 'M20 6 9 17l-5-5',
   user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2m8-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
@@ -142,7 +143,7 @@ export function Field({ label, hint, error, children, full }: { label: string; h
   );
 }
 
-export function Dialog({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Dialog({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean | 'xl' }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -152,7 +153,7 @@ export function Dialog({ title, onClose, children, wide }: { title: string; onCl
   }, [onClose]);
   return (
     <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`dialog${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={ref}>
+      <div className={`dialog${wide ? ' wide' : ''}${wide === 'xl' ? ' xl' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={ref}>
         <div className="dialog-head">
           <h2>{title}</h2>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Tutup">

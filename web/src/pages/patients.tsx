@@ -21,6 +21,7 @@ import { Badge, Dialog, Empty, ErrorBox, Field, Icon, Loading, PageHeader, Reaso
 import { AppointmentDialog } from './schedule.tsx';
 import { InvoiceCreateDialog } from './billing.tsx';
 import { PaymentDialog } from './finance.tsx';
+import { PatientImportDialog } from './patient-import.tsx';
 import { PatientPrivacyPanel } from './privacy.tsx';
 import { ProgramsTab } from './programs.tsx';
 
@@ -34,11 +35,12 @@ export function PatientsPage() {
   const [debounced, setDebounced] = useState('');
   const [status, setStatus] = useState('aktif');
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setDebounced(q.trim()), 300);
     return () => clearTimeout(t);
   }, [q]);
-  const { data, error, loading } = useApi<{ total: number; items: any[] }>(`/patients${qs({ q: debounced, status, limit: 100 })}`);
+  const { data, error, loading, reload } = useApi<{ total: number; items: any[] }>(`/patients${qs({ q: debounced, status, limit: 100 })}`);
   const today = todayIn(me?.organization?.timezone);
 
   return (
@@ -48,9 +50,14 @@ export function PatientsPage() {
         subtitle={can('patient.read') ? 'Data pasien organisasi Anda' : 'Pasien yang ditugaskan kepada Anda'}
         actions={
           can('patient.manage') ? (
-            <button className="btn" onClick={() => setCreating(true)}>
-              <Icon name="plus" /> Pasien baru
-            </button>
+            <>
+              <button className="btn btn-secondary" onClick={() => setImporting(true)}>
+                <Icon name="upload" /> Impor Excel
+              </button>
+              <button className="btn" onClick={() => setCreating(true)}>
+                <Icon name="plus" /> Pasien baru
+              </button>
+            </>
           ) : null
         }
       />
@@ -108,6 +115,7 @@ export function PatientsPage() {
         {data && data.total > data.items.length ? <p className="small muted card-body">Menampilkan {data.items.length} dari {data.total}. Persempit pencarian.</p> : null}
       </div>
       {creating ? <PatientDialog onClose={() => setCreating(false)} onSaved={(id) => navigate(`/pasien/${id}`)} /> : null}
+      {importing ? <PatientImportDialog onClose={() => setImporting(false)} onDone={() => void reload()} /> : null}
     </>
   );
 }

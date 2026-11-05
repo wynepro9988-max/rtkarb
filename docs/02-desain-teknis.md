@@ -206,7 +206,7 @@ Di layar persetujuan, cakupan ini diberi tanda merah.
 | Auth | `POST auth/login`, `GET auth/me`, `POST auth/logout`, `POST auth/logout-all`, `POST auth/change-password`, `POST auth/token-info`, `POST auth/accept-invitation`, `POST auth/reset-password` |
 | Organisasi | `GET/PATCH org`, `GET/POST services`, `PATCH services/:id`, `GET/POST package-types`, `PATCH package-types/:id` |
 | Staf | `GET staff`, `GET staff/therapists`, `GET/POST staff/invitations`, `POST staff/invitations/:id/revoke`, `PATCH staff/:id`, `POST staff/:id/deactivate`, `POST staff/:id/reactivate`, `POST staff/:id/reset-link` |
-| Pasien | `GET/POST patients`, `GET/PATCH patients/:id`, `POST patients/:id/guardians`, `PATCH/DELETE guardians/:id`, `PUT patients/:id/therapists`, `GET patients/:id/{appointments,notes,packages,payments,documents}` |
+| Pasien | `GET/POST patients`, `POST patients/import/preview` dan `POST patients/import` (multipart Excel/CSV), `GET/PATCH patients/:id`, `POST patients/:id/guardians`, `PATCH/DELETE guardians/:id`, `PUT patients/:id/therapists`, `GET patients/:id/{appointments,notes,packages,payments,documents}` |
 | Jadwal | `GET/POST appointments`, `GET appointments/:id`, `POST appointments/:id/{complete,no-show,cancel,reschedule,reopen}` |
 | Catatan | `POST notes`, `GET/PUT notes/:id`, `GET notes/:id/revisions` |
 | Paket | `POST patients/:id/packages`, `GET patient-packages/:id`, `POST patient-packages/:id/{adjust,cancel}` |

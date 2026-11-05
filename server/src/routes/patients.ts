@@ -65,7 +65,7 @@ const GUARDIAN_COLUMNS: Record<string, string> = {
 const PATIENT_FIELDS = `p.id, p.patient_code, p.full_name, p.nickname, p.birth_date, p.sex, p.status,
   p.registered_on, p.address, p.admin_notes, p.anonymized_at, p.created_at, p.updated_at`;
 
-async function insertGuardian(db: Db, orgId: string, patientId: string, userId: string, g: z.output<typeof guardianBody>) {
+export async function insertGuardian(db: Db, orgId: string, patientId: string, userId: string, g: z.output<typeof guardianBody>) {
   if (g.isPrimary) {
     await db.exec(`UPDATE guardians SET is_primary = false WHERE organization_id = $1 AND patient_id = $2`, [orgId, patientId]);
   }

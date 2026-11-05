@@ -33,6 +33,7 @@ lalu memisahkannya dari hal yang **belum** dapat dibuktikan.
 | Hak subjek data | Ekspor data pasien hanya owner (PDF bertanda RAHASIA, tercatat). Anonimisasi hanya owner, wajib alasan + mengetik ulang kode pasien, ditolak bila masih ada jadwal; dijalankan fungsi `SECURITY DEFINER` yang terkunci ke organisasi aktif; berkas ikut dihapus dari penyimpanan; audit tanpa data pribadi | `privacy.test.ts` |
 | Integritas penagihan | Harga invoice dari database, diskon beralasan dengan batas peran, refund ≤ pembayaran (kunci baris + trigger), rekonsiliasi final tidak dapat diubah | `billing.test.ts` |
 | AI / telemetry | Tidak ada analytics, telemetry, atau pengiriman data ke layanan AI pihak ketiga. Font di-host sendiri | Peninjauan kode |
+| Impor pasien | Excel/CSV dibaca di server sendiri tanpa dependensi baru; formula tidak dievaluasi (hanya nilai tersimpan), hasil dekompresi tiap bagian berkas dibatasi 40 MB, maks. 2.000 baris. Tidak ada yang disimpan sebelum pengguna menekan Impor; impor hanya untuk `patient.manage`, dicatat `pasien.diimpor` (jumlah dan kode, tanpa isi data). Tidak ada data yang dikirim ke layanan luar | `patient-import.test.ts` |
 | Dependensi | `npm audit`: 0 kerentanan (29 Okt 2026). Penulis XLSX dibuat sendiri agar tidak menarik dependensi besar | `npm audit` |
 
 ## Aplikasi Android

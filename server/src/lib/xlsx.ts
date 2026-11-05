@@ -77,12 +77,12 @@ const STYLES =
   '<xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
   '</cellXfs></styleSheet>';
 
-interface ZipEntry {
+export interface ZipEntry {
   name: string;
   data: Buffer;
 }
 
-function zip(entries: ZipEntry[]): Buffer {
+export function zip(entries: ZipEntry[]): Buffer {
   const now = new Date();
   const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
   const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();

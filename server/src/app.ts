@@ -27,6 +27,7 @@ import { noteRoutes } from './routes/notes.ts';
 import { orgRoutes } from './routes/org.ts';
 import { packageRoutes } from './routes/packages.ts';
 import { portalRoutes } from './routes/portal.ts';
+import { patientImportRoutes } from './routes/patient-import.ts';
 import { patientRoutes } from './routes/patients.ts';
 import { reportRoutes } from './routes/reports.ts';
 import { staffRoutes } from './routes/staff.ts';
@@ -177,6 +178,7 @@ export async function buildApp(
       await api.register(orgRoutes);
       await api.register(staffRoutes);
       await api.register(patientRoutes);
+      await api.register(patientImportRoutes);
       await api.register(guardianAccountRoutes);
       await api.register(portalRoutes);
       await api.register(appointmentRoutes);

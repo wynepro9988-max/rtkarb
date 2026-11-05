@@ -455,3 +455,41 @@ dengan data DEMO lokal (dihapus lagi).
 perlindungan bulan dibayar menggagalkan 1 test; menyimpan ulang selalu membuat baris baru
 menggagalkan 3 test. Diperiksa di browser (laptop dan HP) dengan data DEMO lokal (dihapus lagi).
 
+## 23. Impor data pasien dari Excel berformat bebas (5 Nov 2026)
+
+**Permintaan owner:** impor data pasien dari Excel dengan format bebas yang terdeteksi otomatis.
+Ini keputusan baru yang eksplisit; tidak ada data lama yang dipindahkan otomatis. Admin/owner
+sendiri yang memilih berkas dan baris yang diimpor.
+
+- Halaman Pasien: tombol **Impor Excel** (hak `patient.manage`: owner dan admin). Menerima .xlsx
+  dan .csv (pemisah `;`, `,`, tab, atau `|`). Berkas .xls lama, .ods, dan berkas berkata sandi ditolak
+  dengan petunjuk untuk menyimpannya sebagai .xlsx.
+- Deteksi otomatis: baris judul kolom dicari di 20 baris pertama (judul laporan di atasnya
+  dilewati), judul dua tingkat ("Data Ibu" di atas "Nama" dan "No HP") digabung, dan judul seperti
+  Nama/Nama Anak, Panggilan, Tgl Lahir/TTL, L/P/JK, Nama Ibu/Ayah/Orang Tua/Wali, No HP/WA,
+  Email, Alamat, Tgl Daftar/Masuk, Status, Keterangan/Kode Pasien dikenali. Tanpa judul, kolom
+  ditebak dari isinya (nama, tanggal, L/P, nomor HP, email).
+- Setiap kolom dapat dikoreksi ("diimpor sebagai"); beberapa kolom boleh digabung ke catatan
+  administrasi dengan label judulnya. Kolom seperti Diagnosa, Usia, atau Sekolah tidak diimpor
+  kecuali dipilih.
+- Perapian: tanggal 12/03/2019, 12-3-19, 2019-03-12, "12 Maret 2019", "Solo, 12 Maret 2019",
+  sel tanggal Excel; kolom berformat bulan/tanggal dikenali sendiri. L/P dari Laki-laki/Perempuan/
+  Pria/Wanita dan sejenisnya. Nomor HP dirapikan ke 08xx (nomor kedua diberi keterangan). Isian
+  "-", "belum ada", "x" dianggap kosong. Nilai yang tidak dikenali dikosongkan dengan keterangan;
+  baris tidak gagal karenanya.
+- Wali: ibu, ayah, dan/atau orang tua/wali umum dibuat sebagai wali; yang punya nomor HP menjadi
+  wali utama. Nomor tanpa nama diberi nama pengganti yang jelas ("Ibu <nama anak>").
+- Pratinjau sebelum menyimpan: *Siap diimpor*, *Sudah terdaftar* (nama sama dengan tanggal lahir
+  sama/kosong, di sistem atau di baris sebelumnya; tidak diimpor kecuali dicentang), dan *Tidak
+  dapat diimpor* (nama kosong/tidak valid). Setiap baris dapat dicentang/dihapus centangnya.
+- Server tidak menyimpan berkas. Pratinjau dan impor membaca ulang berkas yang sama; impor
+  berjalan dalam satu transaksi dengan kunci per organisasi dan memeriksa duplikat ulang. Kode
+  pasien dibuat berurutan seperti pendaftaran biasa. Audit `pasien.diimpor` (jumlah dan kode).
+- Default yang dipilih tanpa aturan owner: baris duplikat tidak diimpor kecuali dicentang;
+  status kosong dianggap aktif; tanggal pendaftaran kosong diisi hari impor; maks. 2.000 baris
+  per impor.
+
+**Bukti:** 12 test baru (`patient-import.test.ts`), total 185 lulus. Uji mutasi: mengabaikan
+daftar baris yang dikecualikan menggagalkan 1 test; mengimpor duplikat tanpa diminta
+menggagalkan 2 test. Diperiksa di browser (laptop dan HP) dengan berkas DEMO berjudul dua
+tingkat dan format tanggal campur.
