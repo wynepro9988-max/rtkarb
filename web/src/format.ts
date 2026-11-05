@@ -15,6 +15,9 @@ export const formatNumber = (n: number | null | undefined) => (n === null || n =
 
 const asUtcDate = (d: string) => new Date(`${d.slice(0, 10)}T00:00:00Z`);
 export const formatDate = (d: string | null | undefined) => (d ? dateLong.format(asUtcDate(d)) : '—');
+// "2026-11" -> "November 2026"
+export const formatMonth = (m: string | null | undefined) =>
+  m ? new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(asUtcDate(`${m}-01`)) : '—';
 export const formatDateShort = (d: string | null | undefined) => (d ? dateShort.format(asUtcDate(d)) : '—');
 export const formatWeekday = (d: string) => weekday.format(asUtcDate(d));
 

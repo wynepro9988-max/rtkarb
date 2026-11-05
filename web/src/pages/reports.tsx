@@ -186,8 +186,16 @@ function Finance({ range }: { range: { from: string; to: string } }) {
         </section>
       </div>
       <StatStrip>
-        <Stat label="Honor belum dibayar" value={formatRupiah(data.compensation.unpaid)} hint="Sesi pada rentang" />
-        <Stat label="Honor sudah dibayar" value={formatRupiah(data.compensation.paid)} />
+        <Stat
+          label="Honor belum dibayar"
+          value={formatRupiah(data.compensation.unpaid + data.fixedPay.unpaid)}
+          hint={`Per sesi ${formatRupiah(data.compensation.unpaid)}, gaji & tunjangan ${formatRupiah(data.fixedPay.unpaid)}`}
+        />
+        <Stat
+          label="Honor sudah dibayar"
+          value={formatRupiah(data.compensation.paid + data.fixedPay.paid)}
+          hint={`Per sesi ${formatRupiah(data.compensation.paid)}, gaji & tunjangan ${formatRupiah(data.fixedPay.paid)}`}
+        />
         <Stat label="Pembayaran dibatalkan" value={formatNumber(data.payments.voided)} />
       </StatStrip>
       <Definitions defs={data.definitions} />

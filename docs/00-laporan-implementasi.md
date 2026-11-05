@@ -30,7 +30,7 @@ konsisten dan dapat ditelusuri.
 |---|---|
 | `server/migrations` (3 file) | Skema 20 tabel, RLS di semua tabel bisnis, FK komposit tenant, hak per kolom, tabel append-only |
 | `server/src` | API Fastify: auth & sesi, otorisasi terpusat, 14 modul rute |
-| `server/test` (16 file) | 158 test integrasi terhadap PostgreSQL sungguhan |
+| `server/test` (17 file) | 165 test integrasi terhadap PostgreSQL sungguhan |
 | `server/scripts` | migrasi berchecksum, CLI administrasi platform, seeder DEMO (khusus `*_dev`) |
 | `web/src` | 17 halaman React berbahasa Indonesia, responsif, dan dapat dicetak (kuitansi) |
 | `android/` | Aplikasi Android native (Java, WebView aman, tanpa dependensi pihak ketiga) |
@@ -48,7 +48,7 @@ Server PostgreSQL lain di mesin ini (port 5432) **tidak disentuh**.
 
 ## 5. Test yang dijalankan & hasil
 
-`npm test`: **16 file, 158 test, 158 lulus, 0 gagal** (run terakhir 1 Nov 2026).
+`npm test`: **17 file, 165 test, 165 lulus, 0 gagal** (run terakhir 5 Nov 2026).
 Test memakai data sintetis (label DEMO, email `.invalid`).
 
 | File | Jumlah | Cakupan (acceptance criteria §13 master prompt) |
@@ -409,4 +409,28 @@ orang tua, dan akun orang tua berasal dari undangan admin.
   punya akun wali di organisasi yang sama langsung dihubungkan (kakak-adik) tanpa undangan baru.
 - Mencabut akses atau menghapus wali terakhir menutup akun dan sesinya seketika. Anonimisasi pasien
   menghapus baris wali, sehingga akses putus dan undangan yang tertunda ikut gugur.
+
+## 21. Honor: gaji pokok, tunjangan, dan per sesi (5 Nov 2026)
+
+**Permintaan owner:** ada terapis bergaji pokok + tunjangan + per sesi, ada yang hanya per sesi,
+dan tunjangan bisa ditambah sesuai kebutuhan.
+
+- Migrasi `010`: `compensation_components` (gaji pokok / tunjangan, nominal per bulan, berlaku
+  per bulan kalender) dan `compensation_component_payouts` (pembayaran per bulan; nama dan nominal
+  dibekukan; tidak dapat diubah atau dihapus oleh role aplikasi).
+- Skema terbaca otomatis dari komponen yang berlaku: "Gaji pokok + tunjangan + per sesi",
+  "Per sesi", dan seterusnya. Honor per sesi (aturan lama) tidak berubah.
+- Satu gaji pokok per terapis per bulan; kenaikan gaji = akhiri yang lama lalu buat yang baru.
+  Tunjangan boleh lebih dari satu. Bulan akhir tidak boleh sebelum bulan yang sudah dibayar.
+- `GET /compensation/monthly?month=YYYY-MM`: per terapis gaji & tunjangan, honor sesi bulan itu,
+  total, belum dibayar. `POST /compensation/components/mark-paid` menandai komponen bulan itu.
+- Hak akses sama dengan honor per sesi: owner mengatur dan membayar, keuangan melihat, terapis
+  hanya miliknya (juga di RLS).
+- Laporan keuangan, PDF, dan Excel (sheet "Gaji & Tunjangan") ikut menghitung komponen bulanan
+  untuk bulan yang tanggal 1-nya berada di rentang laporan.
+- Default yang belum disetujui (F13): tanpa prorata, potongan, pajak, atau BPJS.
+
+**Bukti:** 7 test baru (`compensation-fixed.test.ts`), total 165 lulus. Uji mutasi: mengabaikan
+bulan akhir menggagalkan 3 test; membuka RLS komponen menggagalkan 1 test. Diperiksa di browser
+dengan data DEMO lokal (dihapus lagi).
 

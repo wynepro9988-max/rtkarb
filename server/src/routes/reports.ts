@@ -29,6 +29,7 @@ const FINANCE_DEFINITIONS = {
   selisih_kas: 'Penerimaan dikurangi refund dan pengeluaran tercatat pada rentang. BUKAN laba: belum memperhitungkan kewajiban honor yang belum dibayar, penyusutan, atau biaya yang tidak dicatat.',
   honor_dihitung: 'Honor terapis dari sesi selesai pada rentang yang belum ditandai dibayar.',
   honor_dibayar: 'Honor terapis dari sesi pada rentang yang sudah ditandai dibayar.',
+  gaji_tunjangan: 'Gaji pokok dan tunjangan bulanan untuk bulan yang tanggal 1-nya berada di dalam rentang. Sudah dibayar = tercatat dibayar; belum = komponen berlaku yang belum dibayar. Dihitung penuh per bulan, tanpa prorata, potongan, pajak, atau BPJS.',
   piutang: 'Sisa tagihan invoice aktif, serta sesi per-sesi selesai dan paket yang belum ditagihkan lewat invoice dan belum dibayar penuh (nilai bersih setelah refund, seluruh waktu).',
   qris: 'QRIS dicatat manual oleh petugas; sistem tidak memverifikasi transaksi ke penyedia pembayaran.',
 };
@@ -148,6 +149,18 @@ async function finance(db: Db, ctx: AuthContext, from: string, to: string) {
        FROM therapist_compensations WHERE organization_id = $1 AND session_date BETWEEN $2 AND $3`,
     p,
   );
+  // Bulan yang tanggal 1-nya berada di dalam rentang.
+  const fixedPay = await db.one<{ unpaid: number; paid: number }>(
+    `WITH months AS (
+       SELECT generate_series(date_trunc('month', $2::date - 1) + interval '1 month', $3::date, interval '1 month')::date AS period)
+     SELECT coalesce(sum(c.amount) FILTER (WHERE po.id IS NULL), 0) AS unpaid, coalesce(sum(po.amount), 0) AS paid
+       FROM months mo
+       JOIN compensation_components c
+         ON c.organization_id = $1 AND c.start_month <= mo.period AND (c.end_month IS NULL OR c.end_month >= mo.period)
+       LEFT JOIN compensation_component_payouts po
+         ON po.organization_id = c.organization_id AND po.component_id = c.id AND po.period = mo.period`,
+    [ctx.orgId, from, to],
+  );
   const receivables = await db.one<{ sessions: number; packages: number; invoices: number }>(
     `SELECT
        (SELECT coalesce(sum(a.price - ${netPaidSql('a', 'appointment_id')}), 0) FROM appointments a
@@ -168,6 +181,7 @@ async function finance(db: Db, ctx: AuthContext, from: string, to: string) {
     refunds,
     cashDifference: payments.total - refunds.total - expenses.total,
     compensation,
+    fixedPay,
     receivables,
   };
 }
@@ -258,7 +272,8 @@ export async function reportRoutes(app: FastifyInstance) {
           ['Pengeluaran', rp(d.expenses.total)],
           ['Selisih kas (bukan laba)', rp(d.cashDifference)],
           ['Piutang saat ini', rp(d.receivables.sessions + d.receivables.packages + d.receivables.invoices)],
-          ['Honor belum / sudah dibayar', `${rp((d.compensation as any).unpaid)} / ${rp((d.compensation as any).paid)}`],
+          ['Honor per sesi belum / sudah dibayar', `${rp((d.compensation as any).unpaid)} / ${rp((d.compensation as any).paid)}`],
+          ['Gaji pokok & tunjangan belum / sudah dibayar', `${rp(d.fixedPay.unpaid)} / ${rp(d.fixedPay.paid)}`],
         ]);
         doc.heading('Penerimaan per metode').table(
           [{ header: 'Metode', width: 0.5 }, { header: 'Transaksi', width: 0.2, align: 'right' }, { header: 'Total', width: 0.3, align: 'right' }],
@@ -361,6 +376,22 @@ export async function reportRoutes(app: FastifyInstance) {
             ORDER BY u.full_name, c.session_date`,
           p,
         );
+        const fixedComp = await db.many<Record<string, string | number | null>>(
+          `WITH months AS (
+             SELECT generate_series(date_trunc('month', $2::date - 1) + interval '1 month', $3::date, interval '1 month')::date AS period)
+           SELECT to_char(mo.period, 'YYYY-MM') AS month, u.full_name AS therapist_name, c.name, c.kind,
+                  coalesce(po.amount, c.amount) AS amount, CASE WHEN po.id IS NULL THEN 'belum dibayar' ELSE 'dibayar' END AS status, po.paid_on
+             FROM months mo
+             JOIN compensation_components c
+               ON c.organization_id = $1 AND c.start_month <= mo.period AND (c.end_month IS NULL OR c.end_month >= mo.period)
+             JOIN memberships m ON m.organization_id = c.organization_id AND m.id = c.member_id
+             JOIN users u ON u.id = m.user_id
+             LEFT JOIN compensation_component_payouts po
+               ON po.organization_id = c.organization_id AND po.component_id = c.id AND po.period = mo.period
+            WHERE $4::text IS NOT NULL
+            ORDER BY mo.period, u.full_name, c.kind, c.name`,
+          p,
+        );
         result = [
           {
             name: 'Pembayaran',
@@ -398,6 +429,19 @@ export async function reportRoutes(app: FastifyInstance) {
               { header: 'Tanggal Bayar', width: 14 },
             ],
             rows: comp.map((r) => [r.sessionDate, r.therapistName, r.amount, r.status, r.paidOn]),
+          },
+          {
+            name: 'Gaji & Tunjangan',
+            columns: [
+              { header: 'Bulan', width: 10 },
+              { header: 'Terapis', width: 24 },
+              { header: 'Komponen', width: 24 },
+              { header: 'Jenis', width: 12 },
+              { header: 'Nominal (Rp)', width: 16, money: true },
+              { header: 'Status', width: 14 },
+              { header: 'Tanggal Bayar', width: 14 },
+            ],
+            rows: fixedComp.map((r) => [r.month, r.therapistName, r.name, r.kind === 'gaji_pokok' ? 'gaji pokok' : 'tunjangan', r.amount, r.status, r.paidOn]),
           },
         ];
       }
