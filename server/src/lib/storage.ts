@@ -11,8 +11,8 @@ export interface FileStore {
 }
 
 function assertKey(key: string) {
-  // Dokumen: org/uuid.ext. Video/foto sesi: org/sesi/uuid.ext.
-  if (!/^[0-9a-f-]{36}\/(?:[0-9a-f-]{36}\.(pdf|jpg|png)|sesi\/[0-9a-f-]{36}\.(jpg|png|webp|mp4|mov|3gp))$/.test(key)) {
+  // Dokumen: org/uuid.ext. Video/foto sesi: org/sesi/uuid.ext. Brosur pendaftaran: org/brosur/uuid.ext.
+  if (!/^[0-9a-f-]{36}\/(?:[0-9a-f-]{36}\.(pdf|jpg|png)|sesi\/[0-9a-f-]{36}\.(jpg|png|webp|mp4|mov|3gp)|brosur\/[0-9a-f-]{36}\.(jpg|png|webp))$/.test(key)) {
     throw new Error('Kunci penyimpanan tidak valid');
   }
 }

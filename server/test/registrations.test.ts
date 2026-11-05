@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { withTx } from '../src/db.ts';
-import { buildTenant, json, localDate, login, ORIGIN, setupEnv, type Agent, type Tenant, type TestEnv } from './helpers.ts';
+import { buildTenant, json, localDate, login, multipartBody, ORIGIN, setupEnv, type Agent, type Tenant, type TestEnv } from './helpers.ts';
 
 // Pendaftaran online (pengganti Google Form). Semua data uji adalah data DEMO.
 let env: TestEnv;
@@ -40,7 +40,7 @@ afterAll(() => env.close());
 
 describe('Pendaftaran online', () => {
   it('owner membuka pendaftaran; admin hanya dapat menyalin tautan', async () => {
-    expect(json(await admin.get('/api/org/registration-link'))).toEqual({ open: false, token: null });
+    expect(json(await admin.get('/api/org/registration-link'))).toEqual({ open: false, token: null, hasFlyer: false });
     expect((await admin.put('/api/org/registration-link', { open: true })).statusCode).toBe(403);
     const r = json(await owner.put('/api/org/registration-link', { open: true }));
     expect(r.open).toBe(true);
@@ -52,7 +52,11 @@ describe('Pendaftaran online', () => {
   it('orang tua mengisi formulir publik tanpa akun', async () => {
     const info = json(await publicGet(token));
     expect(info.organizationName).toContain('DEMO Organisasi A');
-    expect(Object.keys(info).sort()).toEqual(['organizationName', 'today']);
+    expect(Object.keys(info).sort()).toEqual(['contact', 'flyerVersion', 'organizationName', 'today']);
+    expect(info.contact).toEqual({ phone: null, whatsapp: null, address: null });
+    // Kontak klinik dari Pengaturan ikut tampil untuk orang tua.
+    expect((await owner.patch('/api/org', { phone: '0271-555-0101', address: 'DEMO Jl. Klinik No. 1' })).statusCode).toBe(200);
+    expect(json(await publicGet(token)).contact).toEqual({ phone: '0271-555-0101', whatsapp: '622715550101', address: 'DEMO Jl. Klinik No. 1' });
     expect((await publicPost(token, form())).statusCode).toBe(201);
     expect((await publicPost(token, form({ childName: 'DEMO Anak Kedua', relationship: 'Ayah', phone: '085600005002' }))).statusCode).toBe(201);
   });
@@ -108,6 +112,9 @@ describe('Pendaftaran online', () => {
     // Pendaftaran berikutnya dengan nama & tanggal lahir yang sama ditandai kemungkinan ganda.
     await publicPost(token, form());
     expect(json(await admin.get('/api/registrations'))[0].existingPatientCode).toBe(p.patientCode);
+    // Kiriman ganda yang masih menunggu ditandai pada keduanya.
+    await publicPost(token, form());
+    expect(json(await admin.get('/api/registrations')).map((r: any) => r.duplicateRequests)).toEqual([1, 1]);
   });
 
   it('RLS: pendaftaran online hanya terbaca dengan cakupan intake all; tidak dapat disisipkan langsung', async () => {
@@ -128,6 +135,40 @@ describe('Pendaftaran online', () => {
     ).rejects.toThrow(/permission denied/);
   });
 
+  it('brosur paket & harga: owner mengunggah, tampil di halaman publik selama pendaftaran dibuka', async () => {
+    const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(128)]);
+    const sendFlyer = (agent: Agent, content: Buffer, name = 'brosur.jpg') => {
+      const body = multipartBody({}, { name, content });
+      return env.app.inject({
+        method: 'PUT',
+        url: '/api/org/registration-flyer',
+        payload: body.payload,
+        headers: { cookie: agent.cookie, 'x-csrf-token': agent.csrf, origin: ORIGIN, 'content-type': body.contentType },
+      });
+    };
+    expect(json(await publicGet(token)).flyerVersion).toBeNull();
+    expect((await env.app.inject({ method: 'GET', url: `/api/public/registration/${token}/flyer` })).statusCode).toBe(404);
+    expect((await sendFlyer(admin, JPEG)).statusCode).toBe(403);
+    expect((await sendFlyer(owner, Buffer.from('%PDF-1.4 DEMO'), 'brosur.pdf')).statusCode).toBe(400);
+    expect((await sendFlyer(owner, JPEG)).statusCode).toBe(200);
+    expect(json(await admin.get('/api/org/registration-link')).hasFlyer).toBe(true);
+
+    const v = json(await publicGet(token)).flyerVersion;
+    expect(v).toBeGreaterThan(0);
+    const img = await env.app.inject({ method: 'GET', url: `/api/public/registration/${token}/flyer?v=${v}` });
+    expect(img.statusCode).toBe(200);
+    expect(img.headers['content-type']).toBe('image/jpeg');
+    expect(img.rawPayload.equals(JPEG)).toBe(true);
+    // Organisasi lain tidak dapat mengganti brosur organisasi ini.
+    const ownerB = await login(env.app, B.owner.email);
+    expect((await sendFlyer(ownerB, JPEG)).statusCode).toBe(200);
+    expect((await env.app.inject({ method: 'GET', url: `/api/public/registration/${token}/flyer` })).rawPayload.equals(JPEG)).toBe(true);
+
+    expect((await owner.delete('/api/org/registration-flyer')).statusCode).toBe(200);
+    expect(json(await publicGet(token)).flyerVersion).toBeNull();
+    expect((await sendFlyer(owner, JPEG)).statusCode).toBe(200);
+  });
+
   it('pendaftaran ditutup atau tautan diganti: tautan lama tidak berlaku', async () => {
     const r = json(await owner.put('/api/org/registration-link', { open: true, regenerate: true }));
     expect(r.token).not.toBe(token);
@@ -135,6 +176,7 @@ describe('Pendaftaran online', () => {
     expect((await publicGet(r.token)).statusCode).toBe(200);
     await owner.put('/api/org/registration-link', { open: false });
     expect((await publicGet(r.token)).statusCode).toBe(404);
+    expect((await env.app.inject({ method: 'GET', url: `/api/public/registration/${r.token}/flyer` })).statusCode).toBe(404);
     expect((await publicPost(r.token, form())).statusCode).toBe(404);
   });
 });

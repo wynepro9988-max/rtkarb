@@ -212,7 +212,7 @@ Di layar persetujuan, cakupan ini diberi tanda merah.
 | Staf | `GET staff`, `GET staff/therapists`, `GET/POST staff/invitations`, `POST staff/invitations/:id/revoke`, `PATCH staff/:id`, `POST staff/:id/deactivate`, `POST staff/:id/reactivate`, `POST staff/:id/reset-link` |
 | Pasien | `GET/POST patients`, `PUT patients/:id/intake`, `POST patients/import/preview` dan `POST patients/import` (multipart Excel/CSV), `GET/PATCH patients/:id`, `POST patients/:id/guardians`, `PATCH/DELETE guardians/:id`, `PUT patients/:id/therapists`, `GET patients/:id/{appointments,notes,packages,payments,documents}` |
 | Jadwal | `GET/POST appointments` (terapis opsional), `GET appointments/:id`, `POST appointments/:id/{complete,no-show,cancel,reschedule,reopen}` |
-| Pendaftaran online | `GET/POST public/registration/:token` (tanpa sesi), `GET/PUT org/registration-link`, `GET registrations`, `POST registrations/:id/reject`; diterima lewat `POST patients` dengan `registrationRequestId` |
+| Pendaftaran online | `GET/POST public/registration/:token` (tanpa sesi), `GET/PUT org/registration-link`, `PUT/DELETE org/registration-flyer` (multipart), `GET public/registration/:token/flyer`, `GET registrations`, `POST registrations/:id/reject`; diterima lewat `POST patients` dengan `registrationRequestId` |
 | Absen & media | `GET absen/patients`, `GET absen/agenda`, `POST absen`, `GET/POST appointments/:id/media` (multipart), `GET media/:id` (Range), `POST media/:id/archive` |
 | Catatan | `POST notes`, `GET/PUT notes/:id`, `GET notes/:id/revisions` |
 | Paket | `POST patients/:id/packages`, `GET patient-packages/:id`, `POST patient-packages/:id/{adjust,cancel}` |

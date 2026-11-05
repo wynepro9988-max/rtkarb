@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { api, post, put, useApi } from '../api.ts';
+import { api, del, post, put, useApi } from '../api.ts';
 import { useAuth } from '../auth.tsx';
 import { formatBytes, formatDate, formatDateTime, formatPhone } from '../format.ts';
 import { Badge, ErrorBox, Field, PageHeader, ReasonDialog, useSubmit, useToast } from '../ui.tsx';
@@ -31,7 +31,14 @@ type OnlineRequest = {
   assessmentTime: string;
   createdAt: string;
   existingPatientCode: string | null;
+  duplicateRequests: number;
 };
+
+// Pesan konfirmasi jadwal asesmen untuk orang tua (dibuka lewat wa.me, dikirim manual oleh admin).
+function confirmationMessage(r: OnlineRequest, orgName: string) {
+  const salam = r.guardianRelationship === 'Ibu' ? 'Ibu' : r.guardianRelationship === 'Ayah' ? 'Bapak' : 'Bapak/Ibu';
+  return `Halo ${salam} ${r.guardianName}, pendaftaran ${r.childName} di ${orgName} sudah kami terima. Jadwal pemeriksaan asesmen: ${formatDate(r.assessmentDate)} pukul ${r.assessmentTime}. Mohon balas pesan ini untuk konfirmasi. Terima kasih.`;
+}
 
 export function RegistrationPage() {
   const { can } = useAuth();
@@ -288,9 +295,11 @@ export function RegistrationPage() {
 
 // Pendaftaran online dari orang tua (halaman publik /daftar/<token>), pengganti Google Form.
 function OnlineRegistrations({ active, onProcess }: { active: string | null; onProcess: (r: OnlineRequest) => void }) {
-  const { can } = useAuth();
+  const { can, me } = useAuth();
   const toast = useToast();
-  const { data: link, reload: reloadLink } = useApi<{ open: boolean; token: string | null }>('/org/registration-link');
+  const { data: link, reload: reloadLink } = useApi<{ open: boolean; token: string | null; hasFlyer: boolean }>('/org/registration-link');
+  const [flyerBusy, setFlyerBusy] = useState(false);
+  const [flyerVersion, setFlyerVersion] = useState(() => Date.now());
   const { data, reload } = useApi<OnlineRequest[]>('/registrations');
   const [rejecting, setRejecting] = useState<OnlineRequest | null>(null);
   const url = link?.token ? `${window.location.origin}/daftar/${link.token}` : null;
@@ -301,6 +310,33 @@ function OnlineRegistrations({ active, onProcess }: { active: string | null; onP
     try {
       await put('/org/registration-link', { open, regenerate });
       toast(regenerate ? 'Tautan pendaftaran baru dibuat' : open ? 'Pendaftaran online dibuka' : 'Pendaftaran online ditutup');
+      void reloadLink();
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    }
+  };
+
+  const uploadFlyer = async (file: File | undefined) => {
+    if (!file) return;
+    const form = new FormData();
+    form.set('file', file);
+    setFlyerBusy(true);
+    try {
+      await api('/org/registration-flyer', { method: 'PUT', form });
+      toast('Brosur pendaftaran disimpan');
+      setFlyerVersion(Date.now());
+      void reloadLink();
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    } finally {
+      setFlyerBusy(false);
+    }
+  };
+  const removeFlyer = async () => {
+    if (!confirm('Hapus brosur dari halaman pendaftaran?')) return;
+    try {
+      await del('/org/registration-flyer');
+      toast('Brosur dihapus');
       void reloadLink();
     } catch (err) {
       toast((err as Error).message, 'error');
@@ -336,6 +372,30 @@ function OnlineRegistrations({ active, onProcess }: { active: string | null; onP
           </p>
         )}
         {owner && link ? (
+          <div className="flyer-admin">
+            {link.hasFlyer && link.open && link.token ? (
+              <img src={`/api/public/registration/${link.token}/flyer?v=${flyerVersion}`} alt="Brosur yang tampil di halaman pendaftaran" />
+            ) : null}
+            <div className="stack" style={{ gap: 6 }}>
+              <strong className="small">Brosur paket & harga</strong>
+              <span className="small muted">
+                {link.hasFlyer ? 'Tampil di atas formulir pendaftaran.' : 'Belum ada. Gambar JPG/PNG (maks. 5 MB) akan tampil di atas formulir pendaftaran.'}
+              </span>
+              <div className="row">
+                <label className="btn btn-sm btn-secondary">
+                  {flyerBusy ? 'Mengunggah…' : link.hasFlyer ? 'Ganti brosur' : 'Unggah brosur'}
+                  <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" disabled={flyerBusy} onChange={(e) => void uploadFlyer(e.target.files?.[0])} />
+                </label>
+                {link.hasFlyer ? (
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => void removeFlyer()}>
+                    Hapus
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {owner && link ? (
           <div className="row">
             <button type="button" className={`btn btn-sm${link.open ? ' btn-secondary' : ''}`} onClick={() => void configure(!link.open)}>
               {link.open ? 'Tutup pendaftaran' : 'Buka pendaftaran online'}
@@ -363,6 +423,7 @@ function OnlineRegistrations({ active, onProcess }: { active: string | null; onP
                     Asesmen {formatDate(r.assessmentDate)}, {r.assessmentTime}
                   </Badge>
                   {r.existingPatientCode ? <Badge tone="warn">Mungkin sudah terdaftar: {r.existingPatientCode}</Badge> : null}
+                  {r.duplicateRequests > 0 ? <Badge tone="warn">Dikirim {r.duplicateRequests + 1}x</Badge> : null}
                   <span className="small muted">Masuk {formatDateTime(r.createdAt)}</span>
                 </span>
               </div>
@@ -370,6 +431,14 @@ function OnlineRegistrations({ active, onProcess }: { active: string | null; onP
                 <button type="button" className="btn btn-sm" onClick={() => onProcess(r)}>
                   Proses
                 </button>
+                <a
+                  className="btn btn-sm btn-secondary"
+                  href={`https://wa.me/${r.phone}?text=${encodeURIComponent(confirmationMessage(r, me?.organization?.name ?? 'klinik kami'))}`}
+                  target="_blank"
+                  rel="noopener"
+                >
+                  Hubungi lewat WA
+                </a>
                 <button type="button" className="btn btn-sm btn-ghost" onClick={() => setRejecting(r)}>
                   Tolak
                 </button>

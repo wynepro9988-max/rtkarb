@@ -21,14 +21,21 @@ const empty = {
   website: '',
 };
 
+type Info = {
+  organizationName: string;
+  today: string;
+  flyerVersion: number | null;
+  contact: { phone: string | null; whatsapp: string | null; address: string | null };
+};
+
 export function PublicRegistrationPage() {
   const { token = '' } = useParams();
-  const [org, setOrg] = useState<{ organizationName: string; today: string } | null>(null);
+  const [org, setOrg] = useState<Info | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [f, setF] = useState(empty);
   const [sent, setSent] = useState<null | { name: string; phone: string }>(null);
   useEffect(() => {
-    get<{ organizationName: string; today: string }>(`/public/registration/${encodeURIComponent(token)}`).then(setOrg, setLoadError);
+    get<Info>(`/public/registration/${encodeURIComponent(token)}`).then(setOrg, setLoadError);
   }, [token]);
   const set = (k: keyof typeof empty) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
 
@@ -52,6 +59,13 @@ export function PublicRegistrationPage() {
           </div>
         </header>
         {!org && !loadError ? <Loading /> : null}
+        {org?.flyerVersion ? (
+          <img
+            className="public-flyer"
+            src={`/api/public/registration/${encodeURIComponent(token)}/flyer?v=${org.flyerVersion}`}
+            alt={`Brosur paket layanan dan harga ${org.organizationName}`}
+          />
+        ) : null}
         <ErrorBox error={loadError} />
         {org && sent ? (
           <div className="stack" style={{ gap: 14 }}>
@@ -109,6 +123,24 @@ export function PublicRegistrationPage() {
               {busy ? 'Mengirim…' : 'Kirim pendaftaran'}
             </button>
           </form>
+        ) : null}
+        {org && (org.contact.phone || org.contact.address) ? (
+          <footer className="public-contact small">
+            {org.contact.phone ? (
+              <p>
+                Ada pertanyaan? Hubungi {org.organizationName}{' '}
+                {org.contact.whatsapp ? (
+                  <a href={`https://wa.me/${org.contact.whatsapp}`} target="_blank" rel="noopener">
+                    lewat WhatsApp {org.contact.phone}
+                  </a>
+                ) : (
+                  <>di {org.contact.phone}</>
+                )}
+                .
+              </p>
+            ) : null}
+            {org.contact.address ? <p className="muted">Alamat: {org.contact.address}</p> : null}
+          </footer>
         ) : null}
       </main>
     </div>

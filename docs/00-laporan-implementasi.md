@@ -563,3 +563,13 @@ aplikasi (keputusan K11).
 RLS tanpa syarat cakupan intake menggagalkan 1 test. Diperiksa di browser: owner membuka
 pendaftaran, orang tua mengisi dari HP, admin melihat penanda di dasbor, memproses (formulir
 terisi otomatis), No. RM terbit, dan jadwal asesmen dibuat sesuai pilihan orang tua.
+
+**Tambahan: brosur di halaman pendaftaran (migrasi `014`).** Owner mengunggah gambar brosur paket
+& harga (JPG/PNG/WebP, maks. 5 MB) dari panel Pendaftaran online; gambar tampil di atas formulir
+publik selama pendaftaran dibuka, per organisasi (tidak ditanam di kode). 1 test baru, total 210
+lulus. Diperiksa di browser dengan brosur dari owner (tampil penuh lebar di layar HP).
+
+**Pemeriksaan ulang alur pendaftaran sebelum dipasang:** ditambahkan tombol *Hubungi lewat WA*
+per pendaftaran masuk (pesan konfirmasi jadwal asesmen terisi otomatis, dikirim manual oleh
+admin), tanda *Dikirim 2x* untuk kiriman ganda yang masih menunggu, serta telepon/WhatsApp dan
+alamat klinik (dari Pengaturan organisasi) di bawah formulir publik. Total 210 test lulus.
