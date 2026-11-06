@@ -9,9 +9,10 @@ import { AppointmentDialog } from './schedule.tsx';
 // Pendaftaran pasien baru: identitas, orang tua, pemeriksaan awal, program terapi, dan berkas.
 // No. RM dibuat otomatis saat disimpan (awalan diatur owner di Pengaturan).
 
-// Informed consent wajib (keputusan owner 5 Nov 2026); berkas lain opsional.
+// Informed consent sementara opsional (permintaan owner 6 Nov 2026; sebelumnya wajib). Pasien tanpa
+// consent tetap ditandai di daftar dan halaman pasien sebagai pengingat. Berkas lain opsional.
 const FILES = [
-  { key: 'informed_consent', title: 'Foto informed consent', required: true },
+  { key: 'informed_consent', title: 'Foto informed consent', required: false },
   { key: 'ktp_ortu', title: 'Foto KTP orang tua', required: false },
   { key: 'kia', title: 'Foto KIA anak', required: false },
   { key: 'foto_anak', title: 'Foto anak', required: false },
@@ -250,7 +251,7 @@ export function RegistrationPage() {
                 <Field
                   key={d.key}
                   label={d.required && !online ? `${d.title} (wajib)` : `${d.title} (opsional)`}
-                  hint={`${d.required ? (online ? 'Boleh menyusul saat kunjungan asesmen; pasien ditandai sampai diunggah. ' : 'Foto lembar persetujuan yang sudah ditandatangani orang tua. ') : ''}JPG, PNG, atau PDF${storage ? `, maks. ${formatBytes(storage.maxUploadBytes)}` : ''}`}
+                  hint={`${d.key === 'informed_consent' ? 'Foto lembar persetujuan yang sudah ditandatangani orang tua. Boleh menyusul; pasien ditandai sampai diunggah. ' : ''}JPG, PNG, atau PDF${storage ? `, maks. ${formatBytes(storage.maxUploadBytes)}` : ''}`}
                 >
                   {(id) => (
                     <input

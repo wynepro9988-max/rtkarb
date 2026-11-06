@@ -573,3 +573,7 @@ lulus. Diperiksa di browser dengan brosur dari owner (tampil penuh lebar di laya
 per pendaftaran masuk (pesan konfirmasi jadwal asesmen terisi otomatis, dikirim manual oleh
 admin), tanda *Dikirim 2x* untuk kiriman ganda yang masih menunggu, serta telepon/WhatsApp dan
 alamat klinik (dari Pengaturan organisasi) di bawah formulir publik. Total 210 test lulus.
+
+**6 Nov 2026:** atas permintaan owner, foto informed consent di formulir Pasien Baru **sementara
+opsional** (K6). Tanda *Belum ada informed consent* di daftar dan halaman pasien tetap ada sebagai
+pengingat.
