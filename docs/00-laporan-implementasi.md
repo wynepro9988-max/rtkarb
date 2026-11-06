@@ -577,3 +577,43 @@ alamat klinik (dari Pengaturan organisasi) di bawah formulir publik. Total 210 t
 **6 Nov 2026:** atas permintaan owner, foto informed consent di formulir Pasien Baru **sementara
 opsional** (K6). Tanda *Belum ada informed consent* di daftar dan halaman pasien tetap ada sebagai
 pengingat.
+
+## 26. Tunjangan per hari hadir, gaji per terapis, dan paket lama (6 Nov 2026)
+
+**Permintaan owner:** tunjangan operasional dihitung sekali per hari, BPJS sekali per bulan;
+gaji dibayarkan tiap tanggal 1 (akumulasi satu bulan) dan ditampilkan per nama dengan total
+saja; paket pasien yang sudah berjalan sebelum memakai aplikasi (mis. sisa 2 sesi) dapat dicatat.
+
+- Tunjangan di *Skema honor* punya pilihan **per bulan** atau **per hari hadir**. Hari hadir =
+  tanggal (zona waktu organisasi) ketika terapis punya minimal satu sesi berstatus selesai;
+  beberapa sesi di tanggal yang sama tetap satu hari (pilihan owner, F13). Gaji pokok selalu
+  bulanan. Sebelumnya semua tunjangan dibayar penuh sekali per bulan, sehingga tunjangan
+  operasional Rp10.000 hanya terhitung Rp10.000 sebulan.
+- *Rekap bulanan → Gaji pokok & tunjangan* kini **satu baris per terapis** berisi total bulan itu
+  (gaji pokok + tunjangan bulanan + tarif harian × hari hadir) dan jumlah hari hadir. Tanggal
+  bayar terisi otomatis **tanggal 1 bulan berikutnya**; bila bulan belum berakhir ada peringatan
+  bahwa hari hadir masih bertambah. Saat ditandai dibayar, nominal dan jumlah hari dibekukan;
+  absen susulan sesudahnya tidak mengubah yang sudah dibayar. Laporan keuangan dan ekspor
+  Excel memakai nominal yang sama (kolom *Hari Hadir*).
+- *Jual paket* punya pilihan **Paket lama (sebelum aplikasi)** untuk owner/keuangan: isi sisa sesi
+  saat ini dan nominal yang sudah dibayar. Nominal itu **tidak masuk pemasukan** (uangnya
+  diterima sebelum aplikasi), hanya mengurangi piutang; kekurangannya menjadi piutang biasa.
+  Sesi terpakai dicatat di riwayat paket sebagai *Saldo awal paket lama*. Paket ditandai
+  *Paket lama* di halaman pasien.
+- Paket lama juga punya kolom **Harga saat dibeli** (bawaan: harga katalog), untuk paket yang
+  dulu dibeli dengan harga berbeda.
+- **Tautkan ke paket** (owner/keuangan): pembayaran berstatus *Umum* (tanpa tujuan) dapat
+  dihubungkan sekali ke paket pasien yang sama, mis. pembayaran paket yang dicatat sebelum
+  paketnya dibuat. Nomor kuitansi, tanggal, dan nominal tidak berubah; nominal tidak boleh
+  melebihi sisa tagihan paket; tercatat di Audit Log (`pembayaran.ditautkan`). Database menolak
+  mengubah tautan yang sudah ada (trigger `payments_link_guard`).
+- Migrasi `015`: `compensation_components.basis`, `compensation_component_payouts.days`,
+  `patient_packages.carried_over/opening_paid`, izin ubah `payments.patient_package_id` + trigger
+  penjaga.
+
+**Bukti:** 11 test baru (`tunjangan-harian-paket-lama.test.ts`), total 221 lulus. Uji mutasi:
+menghitung semua sesi (bukan tanggal unik) menggagalkan 3 test; mengabaikan nominal "sudah
+dibayar" paket lama menggagalkan 2 test; menghapus batas sisa tagihan saat menautkan
+menggagalkan 1 test. Diperiksa di browser (desktop & HP): formulir skema dengan pilihan per hari
+hadir, rekap gaji per terapis, formulir paket lama, dan menautkan pembayaran Umum Rp480.000 ke
+paket lama (kuitansi tetap).

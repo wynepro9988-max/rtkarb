@@ -1,16 +1,27 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../audit.ts';
-import { needTenant, tenantTx } from '../authz/context.ts';
-import { badRequest, conflict, notFound } from '../errors.ts';
-import { idParam, parse, zDate, zText } from '../http.ts';
+import { can, needTenant, tenantTx } from '../authz/context.ts';
+import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { idParam, parse, zDate, zMoney, zText } from '../http.ts';
 import { requirePatient } from './patients.ts';
 
 export async function packageRoutes(app: FastifyInstance) {
   app.post('/patients/:id/packages', async (req, reply) => {
     const ctx = needTenant(req, 'package.sell');
     const patientId = idParam(req.params);
-    const body = parse(z.object({ packageTypeId: z.uuid(), purchasedOn: zDate.optional() }), req.body);
+    // carriedOver: paket lama yang dibeli sebelum memakai aplikasi; sisa sesi dan nominal yang sudah
+    // dibayar di luar aplikasi dicatat sebagai saldo awal (bukan pembayaran baru).
+    const body = parse(
+      z.object({
+        packageTypeId: z.uuid(),
+        purchasedOn: zDate.optional(),
+        // price: harga saat paket dulu dibeli, bila berbeda dari katalog sekarang.
+        carriedOver: z.object({ sessionsRemaining: z.number().int().min(1).max(500), paidBefore: zMoney, price: zMoney.optional() }).optional(),
+      }),
+      req.body,
+    );
+    if (body.carriedOver && !can(ctx, 'payment.record')) throw forbidden('Paket lama hanya dapat dicatat oleh owner atau keuangan');
     const created = await tenantTx(app, ctx, async (db) => {
       const patient = await requirePatient(db, ctx.orgId!, patientId);
       if (patient.status !== 'aktif') throw badRequest('Pasien tidak berstatus aktif');
@@ -19,21 +30,55 @@ export async function packageRoutes(app: FastifyInstance) {
         [ctx.orgId, body.packageTypeId],
       );
       if (!pt) throw badRequest('Jenis paket tidak valid atau tidak aktif');
+      const old = body.carriedOver;
+      if (old && old.sessionsRemaining > pt.sessionsTotal) throw badRequest(`Sisa sesi tidak boleh lebih dari ${pt.sessionsTotal}`);
+      const price = old?.price ?? pt.price;
+      if (old && old.paidBefore > price) throw badRequest('Nominal yang sudah dibayar tidak boleh melebihi harga paket');
+      const used = old ? pt.sessionsTotal - old.sessionsRemaining : 0;
       const row = await db.one<{ id: string }>(
         `INSERT INTO patient_packages
-           (organization_id, patient_id, package_type_id, service_id, name, sessions_total, price, purchased_on, expires_on, created_by, updated_by)
+           (organization_id, patient_id, package_type_id, service_id, name, sessions_total, price, purchased_on, expires_on, created_by, updated_by,
+            sessions_used, carried_over, opening_paid)
          VALUES ($1, $2, $3, $4, $5, $6, $7,
                  coalesce($8::date, (now() AT TIME ZONE $11)::date),
                  CASE WHEN $9::int IS NULL THEN NULL ELSE coalesce($8::date, (now() AT TIME ZONE $11)::date) + $9::int END,
-                 $10, $10)
+                 $10, $10, $12, $13, $14)
          RETURNING id`,
-        [ctx.orgId, patientId, pt.id, pt.serviceId, pt.name, pt.sessionsTotal, pt.price, body.purchasedOn ?? null, pt.validDays, ctx.userId, ctx.timezone],
+        [
+          ctx.orgId,
+          patientId,
+          pt.id,
+          pt.serviceId,
+          pt.name,
+          pt.sessionsTotal,
+          price,
+          body.purchasedOn ?? null,
+          pt.validDays,
+          ctx.userId,
+          ctx.timezone,
+          used,
+          Boolean(old),
+          old?.paidBefore ?? 0,
+        ],
       );
+      if (used > 0) {
+        await db.exec(
+          `INSERT INTO package_ledger (organization_id, patient_id, patient_package_id, kind, sessions_delta, sessions_used_after, reason, created_by)
+           VALUES ($1, $2, $3, 'penyesuaian', $4, $4, $5, $6)`,
+          [ctx.orgId, patientId, row.id, used, `Saldo awal paket lama: sisa ${old!.sessionsRemaining} dari ${pt.sessionsTotal} sesi`, ctx.userId],
+        );
+      }
       await audit(db, req, ctx, {
-        action: 'paket.dijual',
+        action: old ? 'paket.dicatat_lama' : 'paket.dijual',
         entityType: 'patient_package',
         entityId: row.id,
-        meta: { pasien_id: patientId, jenis_paket_id: pt.id, sesi: pt.sessionsTotal, harga: pt.price },
+        meta: {
+          pasien_id: patientId,
+          jenis_paket_id: pt.id,
+          sesi: pt.sessionsTotal,
+          harga: price,
+          ...(old ? { sisa_sesi: old.sessionsRemaining, dibayar_sebelumnya: old.paidBefore } : {}),
+        },
       });
       return row;
     });
@@ -46,7 +91,7 @@ export async function packageRoutes(app: FastifyInstance) {
     return tenantTx(app, ctx, async (db) => {
       const pkg = await db.maybe(
         `SELECT pp.id, pp.patient_id, p.full_name AS patient_name, p.patient_code, pp.name, pp.sessions_total, pp.sessions_used,
-                pp.sessions_total - pp.sessions_used AS sessions_remaining, pp.price, pp.purchased_on, pp.expires_on, pp.status, pp.cancel_reason
+                pp.sessions_total - pp.sessions_used AS sessions_remaining, pp.price, pp.purchased_on, pp.expires_on, pp.status, pp.cancel_reason, pp.carried_over
            FROM patient_packages pp JOIN patients p ON p.organization_id = pp.organization_id AND p.id = pp.patient_id
           WHERE pp.organization_id = $1 AND pp.id = $2`,
         [ctx.orgId, id],

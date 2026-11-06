@@ -6,7 +6,7 @@ import { dataScopes } from '../authz/permissions.ts';
 import type { Db } from '../db.ts';
 import { forbidden } from '../errors.ts';
 import { parse, zRange } from '../http.ts';
-import { invoicedSql, netPaidSql } from '../lib/money-sql.ts';
+import { componentAmountSql, invoicedSql, netPaidSql, workdaysCte } from '../lib/money-sql.ts';
 import { noteFinalLateSql, noteNotFinalSql, noteOverdueSql } from '../lib/note-deadline.ts';
 import { METHOD_LABEL, orgPdf, printedAt, rp, tgl } from '../lib/pdf-format.ts';
 import { pdfReply } from '../lib/pdf.ts';
@@ -29,7 +29,7 @@ const FINANCE_DEFINITIONS = {
   selisih_kas: 'Penerimaan dikurangi refund dan pengeluaran tercatat pada rentang. BUKAN laba: belum memperhitungkan kewajiban honor yang belum dibayar, penyusutan, atau biaya yang tidak dicatat.',
   honor_dihitung: 'Honor terapis dari sesi selesai pada rentang yang belum ditandai dibayar.',
   honor_dibayar: 'Honor terapis dari sesi pada rentang yang sudah ditandai dibayar.',
-  gaji_tunjangan: 'Gaji pokok dan tunjangan bulanan untuk bulan yang tanggal 1-nya berada di dalam rentang. Sudah dibayar = tercatat dibayar; belum = komponen berlaku yang belum dibayar. Dihitung penuh per bulan, tanpa prorata, potongan, pajak, atau BPJS.',
+  gaji_tunjangan: 'Gaji pokok dan tunjangan untuk bulan yang tanggal 1-nya berada di dalam rentang. Sudah dibayar = tercatat dibayar; belum = komponen berlaku yang belum dibayar. Komponen bulanan dihitung penuh per bulan; tunjangan harian = tarif x hari hadir (tanggal dengan minimal satu sesi selesai). Tanpa prorata, potongan, pajak, atau BPJS.',
   piutang: 'Sisa tagihan invoice aktif, serta sesi per-sesi selesai dan paket yang belum ditagihkan lewat invoice dan belum dibayar penuh (nilai bersih setelah refund, seluruh waktu).',
   qris: 'QRIS dicatat manual oleh petugas; sistem tidak memverifikasi transaksi ke penyedia pembayaran.',
 };
@@ -152,14 +152,16 @@ async function finance(db: Db, ctx: AuthContext, from: string, to: string) {
   // Bulan yang tanggal 1-nya berada di dalam rentang.
   const fixedPay = await db.one<{ unpaid: number; paid: number }>(
     `WITH months AS (
-       SELECT generate_series(date_trunc('month', $2::date - 1) + interval '1 month', $3::date, interval '1 month')::date AS period)
-     SELECT coalesce(sum(c.amount) FILTER (WHERE po.id IS NULL), 0) AS unpaid, coalesce(sum(po.amount), 0) AS paid
+       SELECT generate_series(date_trunc('month', $2::date - 1) + interval '1 month', $3::date, interval '1 month')::date AS period),
+     ${workdaysCte('$1', '$4', '(SELECT min(period) FROM months)', '(SELECT max(period) FROM months)')}
+     SELECT coalesce(sum(${componentAmountSql}) FILTER (WHERE po.id IS NULL), 0) AS unpaid, coalesce(sum(po.amount), 0) AS paid
        FROM months mo
        JOIN compensation_components c
          ON c.organization_id = $1 AND c.start_month <= mo.period AND (c.end_month IS NULL OR c.end_month >= mo.period)
+       LEFT JOIN workdays w ON w.member_id = c.member_id AND w.period = mo.period
        LEFT JOIN compensation_component_payouts po
          ON po.organization_id = c.organization_id AND po.component_id = c.id AND po.period = mo.period`,
-    [ctx.orgId, from, to],
+    [ctx.orgId, from, to, ctx.timezone],
   );
   const receivables = await db.one<{ sessions: number; packages: number; invoices: number }>(
     `SELECT
@@ -378,12 +380,15 @@ export async function reportRoutes(app: FastifyInstance) {
         );
         const fixedComp = await db.many<Record<string, string | number | null>>(
           `WITH months AS (
-             SELECT generate_series(date_trunc('month', $2::date - 1) + interval '1 month', $3::date, interval '1 month')::date AS period)
-           SELECT to_char(mo.period, 'YYYY-MM') AS month, u.full_name AS therapist_name, c.name, c.kind,
-                  coalesce(po.amount, c.amount) AS amount, CASE WHEN po.id IS NULL THEN 'belum dibayar' ELSE 'dibayar' END AS status, po.paid_on
+             SELECT generate_series(date_trunc('month', $2::date - 1) + interval '1 month', $3::date, interval '1 month')::date AS period),
+           ${workdaysCte('$1', '$4', '(SELECT min(period) FROM months)', '(SELECT max(period) FROM months)')}
+           SELECT to_char(mo.period, 'YYYY-MM') AS month, u.full_name AS therapist_name, c.name, c.kind, c.basis,
+                  CASE WHEN c.basis = 'harian' THEN coalesce(po.days, w.days, 0) END AS days, c.amount AS rate,
+                  coalesce(po.amount, ${componentAmountSql}) AS amount, CASE WHEN po.id IS NULL THEN 'belum dibayar' ELSE 'dibayar' END AS status, po.paid_on
              FROM months mo
              JOIN compensation_components c
                ON c.organization_id = $1 AND c.start_month <= mo.period AND (c.end_month IS NULL OR c.end_month >= mo.period)
+             LEFT JOIN workdays w ON w.member_id = c.member_id AND w.period = mo.period
              JOIN memberships m ON m.organization_id = c.organization_id AND m.id = c.member_id
              JOIN users u ON u.id = m.user_id
              LEFT JOIN compensation_component_payouts po
@@ -436,12 +441,22 @@ export async function reportRoutes(app: FastifyInstance) {
               { header: 'Bulan', width: 10 },
               { header: 'Terapis', width: 24 },
               { header: 'Komponen', width: 24 },
-              { header: 'Jenis', width: 12 },
+              { header: 'Jenis', width: 18 },
+              { header: 'Hari Hadir', width: 10 },
               { header: 'Nominal (Rp)', width: 16, money: true },
               { header: 'Status', width: 14 },
               { header: 'Tanggal Bayar', width: 14 },
             ],
-            rows: fixedComp.map((r) => [r.month, r.therapistName, r.name, r.kind === 'gaji_pokok' ? 'gaji pokok' : 'tunjangan', r.amount, r.status, r.paidOn]),
+            rows: fixedComp.map((r) => [
+              r.month,
+              r.therapistName,
+              r.name,
+              r.kind === 'gaji_pokok' ? 'gaji pokok' : r.basis === 'harian' ? `tunjangan harian ${rp(Number(r.rate))}` : 'tunjangan bulanan',
+              r.days,
+              r.amount,
+              r.status,
+              r.paidOn,
+            ]),
           },
         ];
       }

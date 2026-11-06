@@ -218,6 +218,37 @@ export async function financeRoutes(app: FastifyInstance) {
     return pdfReply(reply, out.file, `kuitansi-${out.no}.pdf`);
   });
 
+  // Pembayaran "umum" (tanpa tujuan) ditautkan sekali ke paket pasien yang sama, mis. pembayaran paket
+  // yang dicatat sebelum paketnya dibuat. Nomor kuitansi, tanggal, dan nominal tidak berubah.
+  app.post('/payments/:id/link', async (req) => {
+    const ctx = needTenant(req, 'payment.record');
+    const id = idParam(req.params);
+    const { patientPackageId } = parse(z.object({ patientPackageId: z.uuid() }), req.body);
+    await tenantTx(app, ctx, async (db) => {
+      const pay = await db.maybe<{ patientId: string; amount: number; status: string; receiptNo: string; targeted: boolean }>(
+        `SELECT patient_id, amount, status, receipt_no, num_nonnulls(patient_package_id, appointment_id, invoice_id) > 0 AS targeted
+           FROM payments WHERE organization_id = $1 AND id = $2 FOR UPDATE`,
+        [ctx.orgId, id],
+      );
+      if (!pay) throw notFound('Pembayaran');
+      if (pay.status !== 'tercatat') throw conflict('Pembayaran ini sudah dibatalkan');
+      if (pay.targeted) throw conflict('Pembayaran ini sudah untuk paket, sesi, atau invoice');
+      const pkg = await db.maybe<{ status: string; price: number; paid: number }>(
+        `SELECT pp.status, pp.price, ${netPaidSql('pp', 'patient_package_id')} AS paid
+           FROM patient_packages pp WHERE pp.organization_id = $1 AND pp.id = $2 AND pp.patient_id = $3 FOR UPDATE`,
+        [ctx.orgId, patientPackageId, pay.patientId],
+      );
+      if (!pkg) throw badRequest('Paket tidak ditemukan untuk pasien ini');
+      if (pkg.status === 'dibatalkan') throw badRequest('Paket yang dibatalkan tidak dapat dipilih');
+      await assertNotInvoiced(db, ctx.orgId!, 'patient_package_id', patientPackageId);
+      const left = Number(pkg.price) - Number(pkg.paid);
+      if (Number(pay.amount) > left) throw conflict(`Nominal pembayaran melebihi sisa tagihan paket (${rp(left)})`);
+      await db.exec(`UPDATE payments SET patient_package_id = $3 WHERE organization_id = $1 AND id = $2`, [ctx.orgId, id, patientPackageId]);
+      await audit(db, req, ctx, { action: 'pembayaran.ditautkan', entityType: 'payment', entityId: id, meta: { kuitansi: pay.receiptNo, paket_id: patientPackageId } });
+    });
+    return { ok: true };
+  });
+
   app.post('/payments/:id/void', async (req) => {
     const ctx = needTenant(req, 'payment.void');
     const id = idParam(req.params);

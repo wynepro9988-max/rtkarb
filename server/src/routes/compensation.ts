@@ -4,6 +4,7 @@ import { audit } from '../audit.ts';
 import { can, needTenant, tenantTx } from '../authz/context.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import { idParam, parse, zDate, zMoney, zOptText, zPositiveMoney, zRange, zText } from '../http.ts';
+import { componentAmountSql, workdaysCte } from '../lib/money-sql.ts';
 
 const ruleBody = z
   .object({
@@ -29,14 +30,17 @@ const componentBody = z
     kind: z.enum(['gaji_pokok', 'tunjangan']),
     name: zText(2, 80),
     amount: zPositiveMoney,
+    basis: z.enum(['bulanan', 'harian']).default('bulanan'),
     startMonth: zMonth,
     endMonth: zMonth.nullish(),
     notes: zOptText(500),
   })
-  .refine((c) => !c.endMonth || c.endMonth >= c.startMonth, 'Bulan akhir harus sama atau setelah bulan mulai');
+  .refine((c) => !c.endMonth || c.endMonth >= c.startMonth, 'Bulan akhir harus sama atau setelah bulan mulai')
+  .refine((c) => c.kind === 'tunjangan' || c.basis === 'bulanan', 'Gaji pokok selalu bulanan');
 
 // Komponen bulanan berlaku pada bulan `period` (tanggal 1); `c` = compensation_components.
 const activeIn = (period: string) => `c.start_month <= ${period} AND (c.end_month IS NULL OR c.end_month >= ${period})`;
+
 
 export async function compensationRoutes(app: FastifyInstance) {
   const READ = ['compensation.read', 'compensation.read.own'] as const;
@@ -169,7 +173,7 @@ export async function compensationRoutes(app: FastifyInstance) {
     const own = !can(ctx, 'compensation.read');
     return tenantTx(app, ctx, (db) =>
       db.many(
-        `SELECT c.id, c.member_id, u.full_name AS therapist_name, c.kind, c.name, c.amount,
+        `SELECT c.id, c.member_id, u.full_name AS therapist_name, c.kind, c.name, c.amount, c.basis,
                 to_char(c.start_month, 'YYYY-MM') AS start_month, to_char(c.end_month, 'YYYY-MM') AS end_month, c.notes,
                 (SELECT to_char(max(po.period), 'YYYY-MM') FROM compensation_component_payouts po
                   WHERE po.organization_id = c.organization_id AND po.component_id = c.id) AS last_paid_month
@@ -203,8 +207,8 @@ export async function compensationRoutes(app: FastifyInstance) {
         if (overlap) throw conflict('Terapis ini sudah punya gaji pokok pada bulan yang tumpang tindih. Akhiri gaji pokok lama terlebih dahulu.');
       }
       const c = await db.one<{ id: string }>(
-        `INSERT INTO compensation_components (organization_id, member_id, kind, name, amount, start_month, end_month, notes, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        `INSERT INTO compensation_components (organization_id, member_id, kind, name, amount, start_month, end_month, notes, created_by, basis)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
         [
           ctx.orgId,
           body.memberId,
@@ -215,13 +219,14 @@ export async function compensationRoutes(app: FastifyInstance) {
           body.endMonth ? monthStart(body.endMonth) : null,
           body.notes,
           ctx.userId,
+          body.basis,
         ],
       );
       await audit(db, req, ctx, {
         action: 'kompensasi.komponen_dibuat',
         entityType: 'compensation_component',
         entityId: c.id,
-        meta: { terapis: body.memberId, jenis: body.kind, nominal: body.amount, mulai: body.startMonth },
+        meta: { terapis: body.memberId, jenis: body.kind, nominal: body.amount, dasar: body.basis, mulai: body.startMonth },
       });
       return c;
     });
@@ -256,14 +261,29 @@ export async function compensationRoutes(app: FastifyInstance) {
     const own = !can(ctx, 'compensation.read');
     const period = monthStart(month);
     return tenantTx(app, ctx, async (db) => {
-      const fixed = await db.many<{ componentId: string; memberId: string; kind: string; name: string; amount: number; paidOn: string | null }>(
-        `SELECT c.id AS component_id, c.member_id, c.kind, c.name, coalesce(po.amount, c.amount) AS amount, po.paid_on
+      // Tunjangan harian: nominal = tarif x hari hadir; setelah dibayar, nominal & hari dibekukan.
+      const fixed = await db.many<{
+        componentId: string;
+        memberId: string;
+        kind: string;
+        name: string;
+        basis: string;
+        rate: number;
+        days: number | null;
+        amount: number;
+        paidOn: string | null;
+      }>(
+        `WITH ${workdaysCte('$1', '$4', '$2', '$2')}
+         SELECT c.id AS component_id, c.member_id, c.kind, c.name, c.basis, c.amount AS rate,
+                CASE WHEN c.basis = 'harian' THEN coalesce(po.days, w.days, 0) END AS days,
+                coalesce(po.amount, ${componentAmountSql}) AS amount, po.paid_on
            FROM compensation_components c
+           LEFT JOIN workdays w ON w.member_id = c.member_id
            LEFT JOIN compensation_component_payouts po
              ON po.organization_id = c.organization_id AND po.component_id = c.id AND po.period = $2::date
           WHERE c.organization_id = $1 AND ${activeIn('$2::date')} AND ($3::uuid IS NULL OR c.member_id = $3)
-          ORDER BY c.kind, c.name`,
-        [ctx.orgId, period, own ? ctx.memberId : null],
+          ORDER BY c.kind, c.basis, c.name`,
+        [ctx.orgId, period, own ? ctx.memberId : null, ctx.timezone],
       );
       const sessions = await db.many<{ memberId: string; sessions: number; unpaid: number; paid: number }>(
         `SELECT c.member_id, count(*)::int AS sessions,
@@ -314,18 +334,23 @@ export async function compensationRoutes(app: FastifyInstance) {
   });
 
   // Menandai gaji pokok/tunjangan bulan tertentu sebagai dibayar (nominal dibekukan saat itu).
+  // Tunjangan harian tanpa hari hadir pada bulan itu dilewati (tidak ada yang dibayar).
   app.post('/compensation/components/mark-paid', async (req) => {
     const ctx = needTenant(req, 'compensation.manage');
     const body = parse(z.object({ month: zMonth, componentIds: z.array(z.uuid()).min(1).max(500), paidOn: zDate }), req.body);
     const period = monthStart(body.month);
     return tenantTx(app, ctx, async (db) => {
       const n = await db.exec(
-        `INSERT INTO compensation_component_payouts (organization_id, member_id, component_id, period, kind, name, amount, paid_on, recorded_by)
-         SELECT c.organization_id, c.member_id, c.id, $2::date, c.kind, c.name, c.amount, $4, $5
+        `WITH ${workdaysCte('$1', '$6', '$2', '$2')}
+         INSERT INTO compensation_component_payouts (organization_id, member_id, component_id, period, kind, name, amount, days, paid_on, recorded_by)
+         SELECT c.organization_id, c.member_id, c.id, $2::date, c.kind, c.name, ${componentAmountSql},
+                CASE WHEN c.basis = 'harian' THEN w.days END, $4, $5
            FROM compensation_components c
+           LEFT JOIN workdays w ON w.member_id = c.member_id
           WHERE c.organization_id = $1 AND c.id = ANY($3::uuid[]) AND ${activeIn('$2::date')}
+            AND (c.basis = 'bulanan' OR w.days > 0)
          ON CONFLICT (organization_id, component_id, period) DO NOTHING`,
-        [ctx.orgId, period, body.componentIds, body.paidOn, ctx.userId],
+        [ctx.orgId, period, body.componentIds, body.paidOn, ctx.userId, ctx.timezone],
       );
       await audit(db, req, ctx, { action: 'kompensasi.komponen_dibayar', entityType: 'compensation', meta: { bulan: body.month, jumlah: n, tanggal: body.paidOn } });
       return { updated: n };

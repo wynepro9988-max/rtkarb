@@ -419,9 +419,9 @@ export async function patientRoutes(app: FastifyInstance) {
       await requirePatient(db, ctx.orgId!, id);
       return db.many(
         `SELECT pp.id, pp.name, pp.sessions_total, pp.sessions_used, pp.sessions_total - pp.sessions_used AS sessions_remaining,
-                pp.price, pp.purchased_on, pp.expires_on, pp.status, pp.cancel_reason,
+                pp.price, pp.purchased_on, pp.expires_on, pp.status, pp.cancel_reason, pp.carried_over,
                 (pp.expires_on IS NOT NULL AND pp.expires_on < (now() AT TIME ZONE $3)::date) AS expired,
-                ${withFinance ? `(SELECT coalesce(sum(pay.amount), 0) FROM payments pay
+                ${withFinance ? `pp.opening_paid + (SELECT coalesce(sum(pay.amount), 0) FROM payments pay
                   WHERE pay.organization_id = pp.organization_id AND pay.patient_package_id = pp.id AND pay.status = 'tercatat')` : 'NULL::bigint'} AS paid_amount
            FROM patient_packages pp
           WHERE pp.organization_id = $1 AND pp.patient_id = $2

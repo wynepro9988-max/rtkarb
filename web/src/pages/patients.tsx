@@ -17,7 +17,7 @@ import {
   PATIENT_STATUS,
   todayIn,
 } from '../format.ts';
-import { Badge, Dialog, Empty, ErrorBox, Field, Icon, Loading, PageHeader, ReasonDialog, Tabs, useSubmit, useToast } from '../ui.tsx';
+import { Badge, Dialog, Empty, ErrorBox, Field, Icon, Loading, MoneyInput, PageHeader, ReasonDialog, Tabs, useSubmit, useToast } from '../ui.tsx';
 import { AppointmentDialog } from './schedule.tsx';
 import { InvoiceCreateDialog } from './billing.tsx';
 import { PaymentDialog } from './finance.tsx';
@@ -886,7 +886,7 @@ function PackagesTab({ patient }: { patient: any }) {
               {data.map((pk) => (
                 <tr key={pk.id} className="clickable" onClick={() => setDetail(pk.id)}>
                   <td data-label="Paket">
-                    <strong>{pk.name}</strong>
+                    <strong>{pk.name}</strong> {pk.carriedOver ? <Badge>Paket lama</Badge> : null}
                   </td>
                   <td data-label="Dibeli">{formatDate(pk.purchasedOn)}</td>
                   <td data-label="Berlaku s.d.">
@@ -919,24 +919,58 @@ function PackagesTab({ patient }: { patient: any }) {
   );
 }
 
+// Paket lama: dibeli sebelum memakai aplikasi. Sisa sesi dan nominal yang sudah dibayar dicatat sebagai
+// saldo awal; nominal itu tidak masuk pemasukan, hanya kekurangannya yang menjadi piutang.
 function SellPackageDialog({ patientId, onClose, onSaved }: { patientId: string; onClose: () => void; onSaved: () => void }) {
+  const { can } = useAuth();
   const { data: types } = useApi<any[]>('/package-types');
   const active = types?.filter((t) => t.active) ?? [];
   const [typeId, setTypeId] = useState('');
   const [purchasedOn, setPurchasedOn] = useState('');
+  const [carried, setCarried] = useState(false);
+  const [remaining, setRemaining] = useState<number | ''>('');
+  const [price, setPrice] = useState<number | ''>('');
+  const [paidBefore, setPaidBefore] = useState<number | ''>('');
   const toast = useToast();
   const chosen = active.find((t) => t.id === typeId);
-  const { busy, error, submit } = useSubmit(() => post(`/patients/${patientId}/packages`, { packageTypeId: typeId, ...(purchasedOn ? { purchasedOn } : {}) }), () => {
-    toast('Paket ditambahkan. Catat pembayarannya di tab Pembayaran.');
-    onSaved();
-    onClose();
-  });
+  const pick = (id: string) => {
+    setTypeId(id);
+    setPrice(active.find((t) => t.id === id)?.price ?? '');
+    setPaidBefore(active.find((t) => t.id === id)?.price ?? '');
+  };
+  const shortfall = chosen && price !== '' && paidBefore !== '' ? price - paidBefore : 0;
+  const { busy, error, submit } = useSubmit(
+    () =>
+      post(`/patients/${patientId}/packages`, {
+        packageTypeId: typeId,
+        ...(purchasedOn ? { purchasedOn } : {}),
+        ...(carried ? { carriedOver: { sessionsRemaining: Number(remaining), price: Number(price || 0), paidBefore: Number(paidBefore || 0) } } : {}),
+      }),
+    () => {
+      toast(carried ? 'Paket lama dicatat.' : 'Paket ditambahkan. Catat pembayarannya di tab Pembayaran.');
+      onSaved();
+      onClose();
+    },
+  );
   return (
-    <Dialog title="Jual paket" onClose={onClose}>
+    <Dialog title={carried ? 'Catat paket lama' : 'Jual paket'} onClose={onClose}>
       <form className="form" onSubmit={submit}>
+        {can('payment.record') ? (
+          <div className="segmented" role="group" aria-label="Jenis pencatatan paket">
+            <button type="button" aria-pressed={!carried} onClick={() => setCarried(false)}>
+              Paket baru
+            </button>
+            <button type="button" aria-pressed={carried} onClick={() => setCarried(true)}>
+              Paket lama (sebelum aplikasi)
+            </button>
+          </div>
+        ) : null}
+        {carried ? (
+          <p className="small muted">Untuk paket yang sudah berjalan sebelum memakai aplikasi. Isi sisa sesinya saat ini dan berapa yang sudah dibayar orang tua.</p>
+        ) : null}
         <Field label="Jenis paket">
           {(id) => (
-            <select id={id} className="select" value={typeId} onChange={(e) => setTypeId(e.target.value)} required>
+            <select id={id} className="select" value={typeId} onChange={(e) => pick(e.target.value)} required>
               <option value="">Pilih paket…</option>
               {active.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -948,16 +982,44 @@ function SellPackageDialog({ patientId, onClose, onSaved }: { patientId: string;
         </Field>
         {types && active.length === 0 ? <div className="alert info">Belum ada jenis paket aktif. Owner dapat menambahkannya di Pengaturan.</div> : null}
         {chosen ? <p className="small muted">{chosen.validDays ? `Masa berlaku ${chosen.validDays} hari sejak tanggal beli.` : 'Tanpa masa berlaku.'}</p> : null}
-        <Field label="Tanggal beli" hint="Kosongkan untuk hari ini">
+        <Field label="Tanggal beli" hint={carried ? 'Tanggal paket dibeli dulu; kosongkan bila tidak tahu' : 'Kosongkan untuk hari ini'}>
           {(id) => <input id={id} className="input" type="date" value={purchasedOn} onChange={(e) => setPurchasedOn(e.target.value)} />}
         </Field>
+        {carried ? (
+          <div className="form-grid">
+            <Field label="Sisa sesi saat ini" hint={chosen ? `Dari ${chosen.sessionsTotal} sesi` : undefined}>
+              {(id) => (
+                <input
+                  id={id}
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={chosen?.sessionsTotal ?? 500}
+                  value={remaining}
+                  onChange={(e) => setRemaining(e.target.value === '' ? '' : Number(e.target.value))}
+                  required
+                />
+              )}
+            </Field>
+            <Field label="Harga saat dibeli (Rp)" hint="Ubah bila dulu harganya berbeda">
+              {(id) => <MoneyInput id={id} value={price} onChange={setPrice} required />}
+            </Field>
+            <Field
+              label="Dibayar di luar aplikasi (Rp)"
+              hint={`${shortfall > 0 ? `Kekurangan ${formatRupiah(shortfall)} dicatat sebagai piutang.` : 'Lunas.'} Pembayaran yang sudah dicatat di aplikasi jangan diisi di sini; tautkan dari tab Pembayaran.`}
+              full
+            >
+              {(id) => <MoneyInput id={id} value={paidBefore} onChange={setPaidBefore} required />}
+            </Field>
+          </div>
+        ) : null}
         <ErrorBox error={error} />
         <div className="form-actions">
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Batal
           </button>
           <button className="btn" disabled={busy || !typeId}>
-            Simpan
+            {carried ? 'Simpan paket lama' : 'Simpan'}
           </button>
         </div>
       </form>
@@ -1087,6 +1149,7 @@ function PaymentsTab({ patient }: { patient: any }) {
   const { data, error, loading, reload } = useApi<any[]>(`/patients/${patient.id}/payments`);
   const [recording, setRecording] = useState(false);
   const [invoicing, setInvoicing] = useState(false);
+  const [linking, setLinking] = useState<any>(null);
   const toast = useToast();
   return (
     <section className="card">
@@ -1130,7 +1193,14 @@ function PaymentsTab({ patient }: { patient: any }) {
                       {pay.receiptNo}
                     </Link>
                   </td>
-                  <td data-label="Untuk">{pay.packageName ?? (pay.appointmentId ? 'Sesi' : pay.invoiceId ? 'Invoice' : 'Umum')}</td>
+                  <td data-label="Untuk">
+                    {pay.packageName ?? (pay.appointmentId ? 'Sesi' : pay.invoiceId ? 'Invoice' : 'Umum')}
+                    {!pay.packageName && !pay.appointmentId && !pay.invoiceId && pay.status === 'tercatat' && can('payment.record') ? (
+                      <button type="button" className="btn btn-sm btn-ghost" onClick={() => setLinking(pay)}>
+                        Tautkan ke paket
+                      </button>
+                    ) : null}
+                  </td>
                   <td data-label="Metode">{METHOD[pay.method]}</td>
                   <td data-label="Nominal" className="num">
                     {formatRupiah(pay.amount)}
@@ -1145,8 +1215,61 @@ function PaymentsTab({ patient }: { patient: any }) {
         </div>
       ) : null}
       {recording ? <PaymentDialog presetPatient={patient} onClose={() => setRecording(false)} onSaved={reload} /> : null}
+      {linking ? <LinkPaymentDialog patientId={patient.id} payment={linking} onClose={() => setLinking(null)} onSaved={reload} /> : null}
       {invoicing ? <InvoiceCreateDialog presetPatient={patient} onClose={() => setInvoicing(false)} onSaved={() => toast('Invoice dibuat. Lihat di menu Pembayaran & Kas → Invoice.')} /> : null}
     </section>
+  );
+}
+
+// Pembayaran "umum" (mis. pembayaran paket yang dicatat sebelum paketnya dibuat) dihubungkan ke paket.
+function LinkPaymentDialog({ patientId, payment, onClose, onSaved }: { patientId: string; payment: any; onClose: () => void; onSaved: () => void }) {
+  const { data: packages } = useApi<any[]>(`/patients/${patientId}/packages`);
+  const options = packages?.filter((pk) => pk.status !== 'dibatalkan') ?? [];
+  const [packageId, setPackageId] = useState('');
+  const toast = useToast();
+  const { busy, error, submit } = useSubmit(
+    () => post(`/payments/${payment.id}/link`, { patientPackageId: packageId }),
+    () => {
+      toast(`Kuitansi ${payment.receiptNo} ditautkan ke paket`);
+      onSaved();
+      onClose();
+    },
+  );
+  return (
+    <Dialog title="Tautkan pembayaran ke paket" onClose={onClose}>
+      <form className="form" onSubmit={submit}>
+        <p className="small muted">
+          Kuitansi {payment.receiptNo}, {formatDate(payment.paidOn)}, {formatRupiah(payment.amount)}. Nomor kuitansi, tanggal, dan nominal tidak berubah. Tautan tidak dapat
+          diubah lagi.
+        </p>
+        {packages && options.length === 0 ? (
+          <div className="alert info">Pasien ini belum punya paket. Buat dulu di tab Paket (pilih Paket lama bila paketnya sudah berjalan), lalu kembali ke sini.</div>
+        ) : null}
+        {options.length ? (
+          <Field label="Paket">
+            {(id) => (
+              <select id={id} className="select" value={packageId} onChange={(e) => setPackageId(e.target.value)} required>
+                <option value="">Pilih paket…</option>
+                {options.map((pk) => (
+                  <option key={pk.id} value={pk.id}>
+                    {pk.name}, dibeli {formatDate(pk.purchasedOn)}, sisa tagihan {formatRupiah(Math.max(0, pk.price - (pk.paidAmount ?? 0)))}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        ) : null}
+        <ErrorBox error={error} />
+        <div className="form-actions">
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            Batal
+          </button>
+          <button className="btn" disabled={busy || !packageId}>
+            Tautkan
+          </button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

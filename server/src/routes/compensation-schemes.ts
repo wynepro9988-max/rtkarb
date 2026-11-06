@@ -20,7 +20,11 @@ const schemeBody = z
   .object({
     effectiveMonth: zMonth,
     baseSalary: zPositiveMoney.nullish(),
-    allowances: z.array(z.object({ name: zText(2, 80), amount: zPositiveMoney })).max(20).default([]),
+    // basis 'harian': tarif x hari hadir (tanggal dengan minimal satu sesi selesai) pada bulan itu.
+    allowances: z
+      .array(z.object({ name: zText(2, 80), amount: zPositiveMoney, basis: z.enum(['bulanan', 'harian']).default('bulanan') }))
+      .max(20)
+      .default([]),
     perSession: rate.nullish(),
     serviceRates: z.array(rate.and(z.object({ serviceId: z.uuid() }))).max(30).default([]),
     notes: zOptText(500),
@@ -38,6 +42,7 @@ interface ComponentRow {
   kind: string;
   name: string;
   amount: number;
+  basis: string;
   startMonth: string;
   endMonth: string | null;
   lastPaid: string | null;
@@ -65,8 +70,8 @@ async function loadSchemes(db: Db, orgId: string, period: string, memberIds: str
     [orgId, memberIds, period],
   );
   const ids = therapists.map((t) => t.id);
-  const components = await db.many<{ memberId: string; kind: string; name: string; amount: number }>(
-    `SELECT c.member_id, c.kind, c.name, c.amount FROM compensation_components c
+  const components = await db.many<{ memberId: string; kind: string; name: string; amount: number; basis: string }>(
+    `SELECT c.member_id, c.kind, c.name, c.amount, c.basis FROM compensation_components c
       WHERE c.organization_id = $1 AND c.member_id = ANY($2::uuid[])
         AND c.start_month <= $3::date AND (c.end_month IS NULL OR c.end_month >= $3::date)
       ORDER BY c.kind, c.name`,
@@ -104,7 +109,7 @@ async function loadSchemes(db: Db, orgId: string, period: string, memberIds: str
       specialization: t.specialization,
       active: t.status === 'active',
       baseSalary: mine.find((c) => c.kind === 'gaji_pokok')?.amount ?? null,
-      allowances: mine.filter((c) => c.kind === 'tunjangan').map((c) => ({ name: c.name, amount: c.amount })),
+      allowances: mine.filter((c) => c.kind === 'tunjangan').map((c) => ({ name: c.name, amount: c.amount, basis: c.basis })),
       perSession: general ? { scheme: general.scheme, amount: general.amount, percent: general.percent } : null,
       serviceRates: myRules
         .filter((r) => r.serviceId)
@@ -144,11 +149,11 @@ export async function compensationSchemeRoutes(app: FastifyInstance) {
 
       // ---- Gaji pokok & tunjangan ----
       const wanted = [
-        ...(body.baseSalary ? [{ kind: 'gaji_pokok', name: 'Gaji pokok', amount: body.baseSalary, kept: false }] : []),
-        ...body.allowances.map((a) => ({ kind: 'tunjangan', name: a.name, amount: a.amount, kept: false })),
+        ...(body.baseSalary ? [{ kind: 'gaji_pokok', name: 'Gaji pokok', amount: body.baseSalary, basis: 'bulanan', kept: false }] : []),
+        ...body.allowances.map((a) => ({ kind: 'tunjangan', name: a.name, amount: a.amount, basis: a.basis, kept: false })),
       ];
       const existing = await db.many<ComponentRow>(
-        `SELECT c.id, c.kind, c.name, c.amount, to_char(c.start_month, 'YYYY-MM') AS start_month, to_char(c.end_month, 'YYYY-MM') AS end_month,
+        `SELECT c.id, c.kind, c.name, c.amount, c.basis, to_char(c.start_month, 'YYYY-MM') AS start_month, to_char(c.end_month, 'YYYY-MM') AS end_month,
                 (SELECT to_char(max(po.period), 'YYYY-MM') FROM compensation_component_payouts po
                   WHERE po.organization_id = c.organization_id AND po.component_id = c.id) AS last_paid
            FROM compensation_components c
@@ -158,7 +163,8 @@ export async function compensationSchemeRoutes(app: FastifyInstance) {
       );
       for (const c of existing) {
         const match = wanted.find(
-          (w) => !w.kept && w.kind === c.kind && w.name.toLowerCase() === c.name.toLowerCase() && Number(w.amount) === Number(c.amount),
+          (w) =>
+            !w.kept && w.kind === c.kind && w.name.toLowerCase() === c.name.toLowerCase() && Number(w.amount) === Number(c.amount) && w.basis === c.basis,
         );
         if (match && c.startMonth <= body.effectiveMonth && c.endMonth === null) {
           match.kept = true;
@@ -180,9 +186,9 @@ export async function compensationSchemeRoutes(app: FastifyInstance) {
       }
       for (const w of wanted.filter((x) => !x.kept)) {
         await db.exec(
-          `INSERT INTO compensation_components (organization_id, member_id, kind, name, amount, start_month, notes, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [ctx.orgId, memberId, w.kind, w.name, w.amount, period, body.notes, ctx.userId],
+          `INSERT INTO compensation_components (organization_id, member_id, kind, name, amount, start_month, notes, created_by, basis)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [ctx.orgId, memberId, w.kind, w.name, w.amount, period, body.notes, ctx.userId, w.basis],
         );
         changes.dibuat++;
       }
