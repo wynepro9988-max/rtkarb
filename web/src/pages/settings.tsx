@@ -198,7 +198,7 @@ function ServiceDialog({ service, onClose, onSaved }: { service: any; onClose: (
           <Field label="Durasi default (menit)">
             {(id) => <input id={id} className="input" type="number" min={5} max={480} step={5} value={f.defaultDurationMinutes} onChange={(e) => setF({ ...f, defaultDurationMinutes: Number(e.target.value) })} />}
           </Field>
-          <Field label="Tarif per sesi (Rp)" hint="Dipakai untuk tagihan per sesi">
+          <Field label="Tarif per sesi (Rp)" hint="Harga sekali datang (anak tanpa paket)">
             {(id) => <MoneyInput id={id} value={f.defaultPrice} onChange={(v) => setF({ ...f, defaultPrice: v })} />}
           </Field>
         </div>

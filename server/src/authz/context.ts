@@ -148,8 +148,17 @@ export async function resolveAuth(app: FastifyInstance, req: FastifyRequest): Pr
           };
     } else {
       const m = s.organizationId
-        ? await db.maybe<{ id: string; organizationId: string; role: Role; isTherapist: boolean; handlesFinance: boolean; name: string; timezone: string }>(
-            `SELECT m.id, m.organization_id, m.role, m.is_therapist, m.handles_finance, o.name, o.timezone
+        ? await db.maybe<{
+            id: string;
+            organizationId: string;
+            role: Role;
+            isTherapist: boolean;
+            handlesFinance: boolean;
+            managesCatalog: boolean;
+            name: string;
+            timezone: string;
+          }>(
+            `SELECT m.id, m.organization_id, m.role, m.is_therapist, m.handles_finance, m.manages_catalog, o.name, o.timezone
                FROM memberships m
                JOIN organizations o ON o.id = m.organization_id
               WHERE m.user_id = $1 AND m.organization_id = $2
@@ -171,7 +180,7 @@ export async function resolveAuth(app: FastifyInstance, req: FastifyRequest): Pr
         role: m.role,
         isTherapist: m.isTherapist,
         handlesFinance: m.handlesFinance,
-        permissions: permissionsForMember(m.role, m.handlesFinance),
+        permissions: permissionsForMember(m.role, m.handlesFinance, m.managesCatalog),
         support: null,
       };
     }

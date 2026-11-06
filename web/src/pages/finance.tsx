@@ -220,6 +220,10 @@ function Outstanding() {
   );
 }
 
+type PayKind = 'paket' | 'sekali' | 'lainnya';
+
+// "Untuk" tanpa preset: paket (beli baru / cicilan), sekali datang (sesi belum dibayar, atau kunjungan
+// prabayar yang terpakai saat absen), atau lainnya. Paket & kunjungan dibuat otomatis bersama pembayarannya.
 export function PaymentDialog({
   presetPatient,
   presetInvoice,
@@ -237,22 +241,68 @@ export function PaymentDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { me } = useAuth();
+  const { can, me } = useAuth();
   const toast = useToast();
   const [patient, setPatient] = useState<any | null>(presetPatient ?? null);
   const [packages, setPackages] = useState<any[]>([]);
+  const [unpaid, setUnpaid] = useState<any[] | null>(null);
+  const { data: types } = useApi<any[]>('/package-types');
+  const { data: services } = useApi<any[]>('/services');
+  const fixed = Boolean(presetInvoice || presetPackageId || presetAppointmentId);
+  const sell = can('package.sell');
+  const [kind, setKind] = useState<PayKind | null>(null);
+  const [pick, setPick] = useState('');
+  const [serviceId, setServiceId] = useState('');
   const [f, setF] = useState({
     amount: (presetAmount ?? '') as number | '',
     method: 'tunai',
     paidOn: todayIn(me?.organization?.timezone),
     reference: '',
     notes: '',
-    target: presetInvoice ? `inv:${presetInvoice.id}` : presetPackageId ? `pkg:${presetPackageId}` : presetAppointmentId ? `appt:${presetAppointmentId}` : '',
   });
   useEffect(() => {
     if (!patient) return;
+    setUnpaid(null);
     get<any[]>(`/patients/${patient.id}/packages`).then((r) => setPackages(r.filter((p) => p.status !== 'dibatalkan')), () => setPackages([]));
+    get<any[]>(`/patients/${patient.id}/unpaid-sessions`).then(setUnpaid, () => setUnpaid([]));
   }, [patient]);
+
+  const newTypes = sell ? (types ?? []).filter((t) => t.active) : [];
+  const owing = packages
+    .filter((p) => !p.isVisit && p.paidAmount !== null && p.price - p.paidAmount > 0)
+    .map((p) => ({ ...p, outstanding: p.price - p.paidAmount }));
+  const visitServices = (services ?? []).filter((s) => s.active);
+  // Bawaan: sekali datang bila ada sesi yang sudah diabsen dan belum dibayar, selain itu paket.
+  const current: PayKind | null = kind ?? (unpaid ? (unpaid.some((u) => u.status === 'selesai') ? 'sekali' : 'paket') : null);
+  const session = unpaid?.find((u) => u.serviceId === serviceId) ?? null;
+  const service = visitServices.find((s) => s.id === serviceId);
+  const chooseKind = (k: PayKind) => {
+    setKind(k);
+    setPick('');
+    setServiceId('');
+    setF({ ...f, amount: '' });
+  };
+  const choosePick = (v: string) => {
+    setPick(v);
+    const amount = v.startsWith('new:') ? newTypes.find((t) => t.id === v.slice(4))?.price : owing.find((p) => p.id === v.slice(4))?.outstanding;
+    setF({ ...f, amount: amount ?? '' });
+  };
+  const chooseService = (id: string) => {
+    setServiceId(id);
+    const s = unpaid?.find((u) => u.serviceId === id);
+    setF({ ...f, amount: s ? Number(s.outstanding) : (visitServices.find((x) => x.id === id)?.defaultPrice ?? '') });
+  };
+
+  const target = () => {
+    if (presetInvoice) return { invoiceId: presetInvoice.id };
+    if (presetPackageId) return { patientPackageId: presetPackageId };
+    if (presetAppointmentId) return { appointmentId: presetAppointmentId };
+    if (current === 'paket' && pick.startsWith('new:')) return { newPackage: { packageTypeId: pick.slice(4) } };
+    if (current === 'paket' && pick.startsWith('pkg:')) return { patientPackageId: pick.slice(4) };
+    if (current === 'sekali' && serviceId) return session ? { appointmentId: session.appointmentId } : { prepaidVisit: { serviceId } };
+    return {};
+  };
+  const ready = fixed || current === 'lainnya' || (current === 'paket' && pick) || (current === 'sekali' && serviceId && (session || Number(service?.defaultPrice) > 0));
 
   const { busy, error, submit } = useSubmit(
     () =>
@@ -263,9 +313,7 @@ export function PaymentDialog({
         paidOn: f.paidOn,
         reference: f.reference || null,
         notes: f.notes || null,
-        patientPackageId: f.target.startsWith('pkg:') ? f.target.slice(4) : null,
-        appointmentId: f.target.startsWith('appt:') ? f.target.slice(5) : null,
-        invoiceId: f.target.startsWith('inv:') ? f.target.slice(4) : null,
+        ...target(),
       }),
     (r) => {
       toast(`Pembayaran tercatat — kuitansi ${r.receiptNo}`);
@@ -273,6 +321,14 @@ export function PaymentDialog({
       onClose();
     },
   );
+
+  const fixedLabel = presetInvoice
+    ? `Invoice ${presetInvoice.invoiceNo}`
+    : presetPackageId
+      ? `Paket: ${packages.find((p) => p.id === presetPackageId)?.name ?? ''}`
+      : presetAppointmentId
+        ? 'Sesi per sesi'
+        : '';
 
   return (
     <Dialog title="Catat pembayaran" onClose={onClose}>
@@ -287,27 +343,96 @@ export function PaymentDialog({
             <PatientPicker value={patient} onChange={setPatient} />
           )}
         </div>
-        {presetInvoice ? (
+        {fixed ? (
           <div className="field">
             <span className="label">Untuk</span>
-            <div className="input mono">Invoice {presetInvoice.invoiceNo}</div>
+            <div className="input">{fixedLabel}</div>
+          </div>
+        ) : patient ? (
+          <div className="field">
+            <span className="label">Untuk</span>
+            <div className="segmented" role="group" aria-label="Untuk">
+              {(
+                [
+                  ['paket', 'Paket'],
+                  ['sekali', 'Sekali datang'],
+                  ['lainnya', 'Lainnya'],
+                ] as const
+              ).map(([k, label]) => (
+                <button key={k} type="button" aria-pressed={current === k} onClick={() => chooseKind(k)}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         ) : null}
-        {presetAppointmentId || presetInvoice ? null : (
-          <Field label="Untuk">
+        {!fixed && patient && current === 'paket' ? (
+          <Field
+            label="Paket"
+            hint={
+              pick.startsWith('new:')
+                ? 'Paket otomatis tercatat di tab Paket dan terpakai saat anak diabsen.'
+                : pick.startsWith('pkg:')
+                  ? 'Cicilan atau pelunasan paket ini.'
+                  : undefined
+            }
+          >
             {(id) => (
-              <select id={id} className="select" value={f.target} onChange={(e) => setF({ ...f, target: e.target.value })}>
-                <option value="">Pembayaran umum</option>
-                {packages.map((p) => (
-                  <option key={p.id} value={`pkg:${p.id}`}>
-                    Paket: {p.name} ({formatRupiah(p.price)}
-                    {p.paidAmount !== null ? `, terbayar ${formatRupiah(p.paidAmount)}` : ''})
+              <select id={id} className="select" value={pick} onChange={(e) => choosePick(e.target.value)} required>
+                <option value="">Pilih paket…</option>
+                {newTypes.length ? (
+                  <optgroup label="Beli paket baru">
+                    {newTypes.map((t) => (
+                      <option key={t.id} value={`new:${t.id}`}>
+                        {t.name} — {t.sessionsTotal} sesi · {formatRupiah(t.price)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {owing.length ? (
+                  <optgroup label="Cicilan / pelunasan">
+                    {owing.map((p) => (
+                      <option key={p.id} value={`pkg:${p.id}`}>
+                        {p.name}, sisa tagihan {formatRupiah(p.outstanding)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+              </select>
+            )}
+          </Field>
+        ) : null}
+        {!fixed && patient && current === 'sekali' ? (
+          <Field
+            label="Layanan"
+            hint={
+              !serviceId
+                ? undefined
+                : session
+                  ? session.status === 'selesai'
+                    ? `Untuk sesi ${session.serviceName ?? ''} ${formatDate(session.localDate)} yang sudah diabsen dan belum dibayar.`
+                    : `Untuk jadwal ${session.serviceName ?? ''} ${formatDate(session.localDate)} pukul ${session.localTime}.`
+                  : Number(service?.defaultPrice) > 0
+                    ? 'Belum ada sesi yang belum dibayar. Dicatat sebagai 1 kunjungan prabayar dan terpakai otomatis saat anak diabsen.'
+                    : 'Tarif layanan ini belum diatur. Isi di Pengaturan → Layanan.'
+            }
+          >
+            {(id) => (
+              <select id={id} className="select" value={serviceId} onChange={(e) => chooseService(e.target.value)} required>
+                <option value="">Pilih layanan…</option>
+                {visitServices.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {Number(s.defaultPrice) > 0 ? ` — ${formatRupiah(s.defaultPrice)}` : ''}
                   </option>
                 ))}
               </select>
             )}
           </Field>
-        )}
+        ) : null}
+        {!fixed && patient && current === 'lainnya' ? (
+          <p className="small muted">Tidak terhubung ke paket atau sesi, mis. biaya asesmen atau keperluan lain.</p>
+        ) : null}
         <div className="form-grid">
           <Field label="Nominal (Rp)">{(id) => <MoneyInput id={id} value={f.amount} onChange={(v) => setF({ ...f, amount: v })} required />}</Field>
           <Field label="Tanggal bayar">{(id) => <input id={id} className="input" type="date" value={f.paidOn} onChange={(e) => setF({ ...f, paidOn: e.target.value })} required />}</Field>
@@ -337,7 +462,7 @@ export function PaymentDialog({
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Batal
           </button>
-          <button className="btn" disabled={busy || !patient || !f.amount}>
+          <button className="btn" disabled={busy || !patient || !f.amount || !ready}>
             {busy ? 'Menyimpan…' : 'Simpan'}
           </button>
         </div>

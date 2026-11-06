@@ -887,6 +887,7 @@ function PackagesTab({ patient }: { patient: any }) {
                 <tr key={pk.id} className="clickable" onClick={() => setDetail(pk.id)}>
                   <td data-label="Paket">
                     <strong>{pk.name}</strong> {pk.carriedOver ? <Badge>Paket lama</Badge> : null}
+                    {pk.isVisit ? <Badge>Prabayar</Badge> : null}
                   </td>
                   <td data-label="Dibeli">{formatDate(pk.purchasedOn)}</td>
                   <td data-label="Berlaku s.d.">
@@ -1221,16 +1222,30 @@ function PaymentsTab({ patient }: { patient: any }) {
   );
 }
 
-// Pembayaran "umum" (mis. pembayaran paket yang dicatat sebelum paketnya dibuat) dihubungkan ke paket.
+// Pembayaran "umum" (mis. pembayaran paket yang dicatat sebelum paketnya dibuat) dihubungkan ke paket yang
+// sudah ada, atau ke paket lama yang dibuat sekaligus di sini (tanggal beli = tanggal bayar).
 function LinkPaymentDialog({ patientId, payment, onClose, onSaved }: { patientId: string; payment: any; onClose: () => void; onSaved: () => void }) {
   const { data: packages } = useApi<any[]>(`/patients/${patientId}/packages`);
+  const { data: types } = useApi<any[]>('/package-types');
   const options = packages?.filter((pk) => pk.status !== 'dibatalkan') ?? [];
+  const activeTypes = types?.filter((t) => t.active) ?? [];
+  const [mode, setMode] = useState<'baru' | 'ada' | null>(null);
+  const current = mode ?? (packages ? (options.length ? 'ada' : 'baru') : null);
   const [packageId, setPackageId] = useState('');
+  const [typeId, setTypeId] = useState('');
+  const [remaining, setRemaining] = useState<number | ''>('');
+  const [price, setPrice] = useState<number | ''>(Number(payment.amount));
+  const chosen = activeTypes.find((t) => t.id === typeId);
+  const shortfall = price === '' ? 0 : price - Number(payment.amount);
   const toast = useToast();
   const { busy, error, submit } = useSubmit(
-    () => post(`/payments/${payment.id}/link`, { patientPackageId: packageId }),
+    () =>
+      post(
+        `/payments/${payment.id}/link`,
+        current === 'baru' ? { newPackage: { packageTypeId: typeId, sessionsRemaining: Number(remaining), price: Number(price || 0) } } : { patientPackageId: packageId },
+      ),
     () => {
-      toast(`Kuitansi ${payment.receiptNo} ditautkan ke paket`);
+      toast(current === 'baru' ? `Paket lama dicatat dan kuitansi ${payment.receiptNo} ditautkan` : `Kuitansi ${payment.receiptNo} ditautkan ke paket`);
       onSaved();
       onClose();
     },
@@ -1239,13 +1254,20 @@ function LinkPaymentDialog({ patientId, payment, onClose, onSaved }: { patientId
     <Dialog title="Tautkan pembayaran ke paket" onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <p className="small muted">
-          Kuitansi {payment.receiptNo}, {formatDate(payment.paidOn)}, {formatRupiah(payment.amount)}. Nomor kuitansi, tanggal, dan nominal tidak berubah. Tautan tidak dapat
-          diubah lagi.
+          Kuitansi {payment.receiptNo}, {formatDate(payment.paidOn)}, {formatRupiah(payment.amount)}. Nomor kuitansi, tanggal, dan nominal tidak berubah.
         </p>
-        {packages && options.length === 0 ? (
-          <div className="alert info">Pasien ini belum punya paket. Buat dulu di tab Paket (pilih Paket lama bila paketnya sudah berjalan), lalu kembali ke sini.</div>
-        ) : null}
+        {!current ? <Loading /> : null}
         {options.length ? (
+          <div className="segmented" role="group" aria-label="Paket tujuan">
+            <button type="button" aria-pressed={current === 'ada'} onClick={() => setMode('ada')}>
+              Paket yang sudah ada
+            </button>
+            <button type="button" aria-pressed={current === 'baru'} onClick={() => setMode('baru')}>
+              Paket lama baru
+            </button>
+          </div>
+        ) : null}
+        {current === 'ada' ? (
           <Field label="Paket">
             {(id) => (
               <select id={id} className="select" value={packageId} onChange={(e) => setPackageId(e.target.value)} required>
@@ -1259,13 +1281,53 @@ function LinkPaymentDialog({ patientId, payment, onClose, onSaved }: { patientId
             )}
           </Field>
         ) : null}
+        {current === 'baru' ? (
+          <>
+            <Field label="Jenis paket">
+              {(id) => (
+                <select id={id} className="select" value={typeId} onChange={(e) => setTypeId(e.target.value)} required>
+                  <option value="">Pilih paket…</option>
+                  {activeTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.sessionsTotal} sesi)
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+            <div className="form-grid">
+              <Field label="Sisa sesi saat ini" hint={chosen ? `Dari ${chosen.sessionsTotal} sesi` : undefined}>
+                {(id) => (
+                  <input
+                    id={id}
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={chosen?.sessionsTotal ?? 500}
+                    value={remaining}
+                    onChange={(e) => setRemaining(e.target.value === '' ? '' : Number(e.target.value))}
+                    required
+                  />
+                )}
+              </Field>
+              <Field
+                label="Harga paket (Rp)"
+                hint={shortfall > 0 ? `Kekurangan ${formatRupiah(shortfall)} dicatat sebagai piutang` : shortfall < 0 ? 'Tidak boleh kurang dari nominal pembayaran' : 'Lunas dengan pembayaran ini'}
+              >
+                {(id) => <MoneyInput id={id} value={price} onChange={setPrice} required />}
+              </Field>
+            </div>
+            <p className="small muted">Paket dicatat dengan tanggal beli {formatDate(payment.paidOn)} dan langsung terhubung ke kuitansi ini.</p>
+          </>
+        ) : null}
+        <p className="small muted">Tautan tidak dapat diubah lagi.</p>
         <ErrorBox error={error} />
         <div className="form-actions">
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Batal
           </button>
-          <button className="btn" disabled={busy || !packageId}>
-            Tautkan
+          <button className="btn" disabled={busy || !current || (current === 'ada' ? !packageId : !typeId || shortfall < 0)}>
+            {current === 'baru' ? 'Simpan & tautkan' : 'Tautkan'}
           </button>
         </div>
       </form>

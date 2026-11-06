@@ -191,9 +191,12 @@ export function permissionsForRole(role: Role): Set<Permission> {
 
 // Admin yang oleh owner ditandai merangkap keuangan (memberships.handles_finance) mendapat
 // seluruh hak peran keuangan. Catatan klinis, pengaturan, dan audit log tetap tidak termasuk.
-export function permissionsForMember(role: Role, handlesFinance: boolean): Set<Permission> {
+// Admin yang diberi akses harga (memberships.manages_catalog) dapat mengubah layanan & tarif serta
+// jenis & harga paket; pengaturan organisasi lainnya tetap milik owner.
+export function permissionsForMember(role: Role, handlesFinance: boolean, managesCatalog = false): Set<Permission> {
   const perms = permissionsForRole(role);
   if (role === 'admin' && handlesFinance) for (const p of ROLE_PERMISSIONS.keuangan) perms.add(p);
+  if (role === 'admin' && managesCatalog) perms.add('catalog.manage');
   return perms;
 }
 

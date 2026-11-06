@@ -607,13 +607,63 @@ saja; paket pasien yang sudah berjalan sebelum memakai aplikasi (mis. sisa 2 ses
   paketnya dibuat. Nomor kuitansi, tanggal, dan nominal tidak berubah; nominal tidak boleh
   melebihi sisa tagihan paket; tercatat di Audit Log (`pembayaran.ditautkan`). Database menolak
   mengubah tautan yang sudah ada (trigger `payments_link_guard`).
+- **Satu langkah (permintaan owner, 6 Nov malam):** bila pasien belum punya paket, jendela *Tautkan
+  ke paket* langsung berisi isian paket lama (jenis paket, sisa sesi, harga paket; bawaan harga =
+  nominal pembayaran = lunas). *Simpan & tautkan* membuat paket lama bertanggal beli sama dengan
+  tanggal bayar dan menautkan kuitansinya dalam satu transaksi; bila gagal, tidak ada paket yang
+  tertinggal. Tanpa migrasi baru.
 - Migrasi `015`: `compensation_components.basis`, `compensation_component_payouts.days`,
   `patient_packages.carried_over/opening_paid`, izin ubah `payments.patient_package_id` + trigger
   penjaga.
 
-**Bukti:** 11 test baru (`tunjangan-harian-paket-lama.test.ts`), total 221 lulus. Uji mutasi:
+**Bukti:** 12 test baru (`tunjangan-harian-paket-lama.test.ts`), total 222 lulus. Uji mutasi:
 menghitung semua sesi (bukan tanggal unik) menggagalkan 3 test; mengabaikan nominal "sudah
 dibayar" paket lama menggagalkan 2 test; menghapus batas sisa tagihan saat menautkan
 menggagalkan 1 test. Diperiksa di browser (desktop & HP): formulir skema dengan pilihan per hari
 hadir, rekap gaji per terapis, formulir paket lama, dan menautkan pembayaran Umum Rp480.000 ke
 paket lama (kuitansi tetap).
+
+## 27. Bayar langsung untuk paket / sekali datang, dan admin boleh ubah harga (6 Nov 2026)
+
+**Permintaan owner:** pembayaran langsung masuk ke paket atau ke kunjungan sekali datang tanpa harus
+membuat paket dulu (tab Paket cukup untuk memantau/koreksi); admin dapat diberi akses mengubah tarif
+dan harga paket.
+
+- *Catat pembayaran* → **Untuk**: **Paket** (beli paket baru dari katalog → paket dibuat otomatis
+  bertanggal beli = tanggal bayar; atau cicilan/pelunasan paket yang ada), **Sekali datang** (pilih
+  layanan; bila ada sesi per-sesi yang belum dibayar, pembayaran masuk ke sesi itu, didahulukan yang
+  sudah diabsen; bila tidak ada, dicatat sebagai **kunjungan prabayar** = paket 1 sesi bertarif
+  layanan yang terpakai otomatis saat anak diabsen), atau **Lainnya** (umum). Nominal terisi
+  otomatis; nominal di atas harga ditolak; pembuatan paket dan pembayaran dalam satu transaksi.
+  Kunjungan prabayar bertanda *Prabayar* di tab Paket dan tidak ikut peringatan paket hampir habis.
+- **Admin boleh mengubah tarif & harga paket:** owner mencentang per admin di *Staf → Ubah*
+  (`memberships.manages_catalog`, hak `catalog.manage`); pengaturan organisasi lain tetap owner.
+  Pindah peran melepas akses ini.
+- Migrasi `016` (`patient_packages.is_visit`) dan `017` (`memberships.manages_catalog`). Endpoint
+  baru `GET /patients/:id/unpaid-sessions`.
+
+**Bukti:** 8 test baru (`bayar-langsung.test.ts`), total 230 lulus. Uji mutasi: menghapus batas
+nominal ≤ harga menggagalkan 2 test; kunjungan prabayar ikut peringatan dasbor menggagalkan 1 test.
+Diperiksa di browser: Catat pembayaran → Paket / Sekali datang (kunjungan prabayar tampil di tab
+Paket), dan centang akses harga di Staf.
+
+## 28. Impor rekap absensi lama (6 Nov 2026)
+
+**Permintaan owner:** sesi November yang tercatat di Google Form absensi terapis (sebelum memakai
+Absen Sesi di aplikasi) dimasukkan ke aplikasi beserta catatannya, pasien yang belum terdaftar
+dibuat dengan data minimal, dan tunjangan operasional terapis menjadi per hari hadir mulai November.
+
+- Alat baris perintah `server/scripts/impor-rekap.ts <file.json> [--commit]` dengan logika di
+  `server/src/lib/impor-rekap.ts`. Seluruh impor berjalan dalam **satu transaksi**; tanpa
+  `--commit` hanya uji coba (dibatalkan), dan satu baris gagal membatalkan semuanya. Hanya atas
+  nama owner. Idempoten: pasien bernama sama dan sesi yang sama (pasien, terapis, layanan,
+  tanggal) tidak dibuat ganda bila diulang.
+- Sesi impor bertagihan **tanpa biaya** (sisa paket per hari ini dicatat terpisah sebagai paket
+  lama), terapis tertaut ke pasien, honor per sesi dihitung seperti absen biasa, dan catatan sesi
+  final ditulis **atas nama terapis** (terlihat orang tua sesuai K8). Audit log bertanda
+  `lewat: impor_rekap`. File masukan berisi data nyata dan tidak disimpan di repositori.
+
+**Bukti:** 4 test baru (`impor-rekap.test.ts`): uji coba tidak menyimpan; hasil simpan (pasien,
+sesi tanpa biaya, paket tidak terpotong, tidak jadi tagihan, catatan penulis terapis, honor,
+tunjangan harian, audit); impor ulang tidak menggandakan; bukan owner ditolak dan kesalahan satu
+baris membatalkan semuanya. Total 234 lulus.

@@ -87,6 +87,7 @@ export function StaffPage() {
                       <td data-label="Peran">
                         {m.roleLabel}
                         {m.isTherapist && m.role !== 'terapis' ? <span className="muted small"> · juga terapis</span> : null}
+                        {m.managesCatalog ? <span className="muted small"> · ubah harga</span> : null}
                         {m.specialization ? <div className="small muted">{m.specialization}</div> : null}
                       </td>
                       <td data-label="Status">
@@ -226,9 +227,21 @@ function InviteDialog({ onClose, onDone }: { onClose: () => void; onDone: (r: { 
 }
 
 function EditMemberDialog({ member, onClose, onSaved }: { member: any; onClose: () => void; onSaved: () => void }) {
-  const [f, setF] = useState({ role: member.role, isTherapist: member.isTherapist, handlesFinance: member.handlesFinance, specialization: member.specialization ?? '' });
+  const [f, setF] = useState({
+    role: member.role,
+    isTherapist: member.isTherapist,
+    handlesFinance: member.handlesFinance,
+    managesCatalog: member.managesCatalog,
+    specialization: member.specialization ?? '',
+  });
   const toast = useToast();
-  const save = () => patch(`/staff/${member.id}`, { ...f, handlesFinance: f.role === 'admin' && f.handlesFinance, specialization: f.specialization || null });
+  const save = () =>
+    patch(`/staff/${member.id}`, {
+      ...f,
+      handlesFinance: f.role === 'admin' && f.handlesFinance,
+      managesCatalog: f.role === 'admin' && f.managesCatalog,
+      specialization: f.specialization || null,
+    });
   const { busy, error, submit } = useSubmit(save, () => {
     toast('Perubahan disimpan dan langsung berlaku');
     onSaved();
@@ -249,6 +262,14 @@ function EditMemberDialog({ member, onClose, onSaved }: { member: any; onClose: 
           )}
         </Field>
         {f.role === 'admin' ? <FinanceCheck checked={f.handlesFinance} onChange={(v) => setF({ ...f, handlesFinance: v })} /> : null}
+        {f.role === 'admin' ? (
+          <div className="field">
+            <label className="check">
+              <input type="checkbox" checked={f.managesCatalog} onChange={(e) => setF({ ...f, managesCatalog: e.target.checked })} /> Boleh mengubah tarif & harga paket
+            </label>
+            <span className="hint">Mengatur layanan terapi beserta tarif sekali datang, serta jenis dan harga paket (Pengaturan). Pengaturan lain tetap oleh owner.</span>
+          </div>
+        ) : null}
         {f.role !== 'terapis' ? (
           <label className="check">
             <input type="checkbox" checked={f.isTherapist} onChange={(e) => setF({ ...f, isTherapist: e.target.checked })} /> Juga menangani sesi terapi

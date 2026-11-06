@@ -176,6 +176,7 @@ describe('Pembayaran umum ditautkan ke paket', () => {
   const oldPackage = async (patientId = A.patientId, price = 480_000) =>
     json(await owner.post(`/api/patients/${patientId}/packages`, { packageTypeId: A.packageTypeId, carriedOver: { sessionsRemaining: 4, price, paidBefore: 0 } })).id as string;
   const link = (paymentId: string, patientPackageId: string, agent = owner) => agent.post(`/api/payments/${paymentId}/link`, { patientPackageId });
+  const packages = async () => json(await owner.get(`/api/patients/${A.patientId}/packages`));
 
   it('kuitansi tetap, paket menjadi lunas, tercatat di audit, dan hanya sekali', async () => {
     const pay = await payUmum(480_000);
@@ -195,6 +196,32 @@ describe('Pembayaran umum ditautkan ke paket', () => {
     await expect(
       env.adminPool.query(`UPDATE payments SET patient_package_id = NULL WHERE id = $1`, [pay.id]),
     ).rejects.toThrow(/Hanya pembayaran umum/);
+  });
+
+  it('satu langkah: paket lama dibuat sekaligus dan ditautkan; gagal = tidak ada paket tertinggal', async () => {
+    const before = (await packages()).length;
+    const pay = await payUmum(480_000);
+    const newPackage = { packageTypeId: A.packageTypeId, sessionsRemaining: 4, price: 480_000 };
+    expect((await owner.post(`/api/payments/${pay.id}/link`, {})).statusCode).toBe(400);
+    expect((await owner.post(`/api/payments/${pay.id}/link`, { patientPackageId: await oldPackage(), newPackage })).statusCode).toBe(400);
+    expect((await admin.post(`/api/payments/${pay.id}/link`, { newPackage })).statusCode).toBe(403);
+    // Harga di bawah nominal pembayaran ditolak, dan paket yang sempat dibuat ikut dibatalkan (satu transaksi).
+    expect((await owner.post(`/api/payments/${pay.id}/link`, { newPackage: { ...newPackage, price: 400_000 } })).statusCode).toBe(409);
+    expect((await packages()).length).toBe(before + 1); // hanya paket dari oldPackage() di atas
+
+    const res = await owner.post(`/api/payments/${pay.id}/link`, { newPackage });
+    expect(res.statusCode).toBe(200);
+    const { patientPackageId } = json(res);
+    expect((await packages()).find((p: any) => p.id === patientPackageId)).toMatchObject({
+      carriedOver: true,
+      sessionsTotal: 8,
+      sessionsRemaining: 4,
+      price: 480_000,
+      paidAmount: 480_000,
+      purchasedOn: '2026-10-25',
+    });
+    expect(json(await owner.get('/api/finance/outstanding')).packages.some((p: any) => p.patientPackageId === patientPackageId)).toBe(false);
+    expect(json(await owner.get(`/api/patients/${A.patientId}/payments`)).find((p: any) => p.id === pay.id).packageName).toBe('Paket 8 Sesi');
   });
 
   it('ditolak: paket pasien lain, melebihi sisa tagihan, pembayaran dibatalkan', async () => {

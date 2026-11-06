@@ -1,14 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../audit.ts';
-import { needTenant, tenantTx } from '../authz/context.ts';
-import { badRequest, conflict, notFound } from '../errors.ts';
+import { can, needTenant, tenantTx } from '../authz/context.ts';
+import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { idParam, parse, zDate, zMethod, zOptText, zPositiveMoney, zRange, zText } from '../http.ts';
 import { nextCounter } from '../lib/counters.ts';
 import { invoicedSql, netPaidSql } from '../lib/money-sql.ts';
 import { METHOD_LABEL, orgPdf, printedAt, rp, tgl } from '../lib/pdf-format.ts';
 import { pdfReply } from '../lib/pdf.ts';
 import type { Db } from '../db.ts';
+import { createPatientPackage, createVisitPackage } from './packages.ts';
 import { requirePatient } from './patients.ts';
 
 const paymentBody = z.object({
@@ -21,6 +22,9 @@ const paymentBody = z.object({
   patientPackageId: z.uuid().nullish(),
   appointmentId: z.uuid().nullish(),
   invoiceId: z.uuid().nullish(),
+  // Dibuat sekaligus dengan pembayarannya: paket baru dari katalog, atau kunjungan prabayar satu layanan.
+  newPackage: z.object({ packageTypeId: z.uuid() }).nullish(),
+  prepaidVisit: z.object({ serviceId: z.uuid() }).nullish(),
 });
 
 const expenseBody = z.object({
@@ -71,11 +75,20 @@ export async function financeRoutes(app: FastifyInstance) {
   app.post('/payments', async (req, reply) => {
     const ctx = needTenant(req, 'payment.record');
     const body = parse(paymentBody, req.body);
-    if ([body.patientPackageId, body.appointmentId, body.invoiceId].filter(Boolean).length > 1) {
+    if ([body.patientPackageId, body.appointmentId, body.invoiceId, body.newPackage, body.prepaidVisit].filter(Boolean).length > 1) {
       throw badRequest('Pilih salah satu: invoice, paket, atau sesi');
     }
+    if ((body.newPackage || body.prepaidVisit) && !can(ctx, 'package.sell')) throw forbidden();
     const created = await tenantTx(app, ctx, async (db) => {
       await requirePatient(db, ctx.orgId!, body.patientId);
+      if (body.newPackage || body.prepaidVisit) {
+        const pkg = body.newPackage
+          ? await createPatientPackage(db, req, ctx, body.patientId, { packageTypeId: body.newPackage.packageTypeId, purchasedOn: body.paidOn })
+          : await createVisitPackage(db, req, ctx, body.patientId, body.prepaidVisit!.serviceId, body.paidOn);
+        const { price } = await db.one<{ price: number }>(`SELECT price FROM patient_packages WHERE organization_id = $1 AND id = $2`, [ctx.orgId, pkg.id]);
+        if (body.amount > Number(price)) throw badRequest(`Nominal melebihi harga (${rp(Number(price))})`);
+        body.patientPackageId = pkg.id;
+      }
       if (body.patientPackageId) {
         const pkg = await db.maybe(`SELECT 1 FROM patient_packages WHERE organization_id = $1 AND id = $2 AND patient_id = $3`, [
           ctx.orgId,
@@ -218,21 +231,63 @@ export async function financeRoutes(app: FastifyInstance) {
     return pdfReply(reply, out.file, `kuitansi-${out.no}.pdf`);
   });
 
+  // Sesi per-sesi seorang pasien yang belum lunas (sudah diabsen atau masih terjadwal), untuk pilihan
+  // "Sekali datang" di formulir pembayaran. Yang sudah diabsen didahulukan, lalu jadwal terdekat.
+  app.get('/patients/:id/unpaid-sessions', async (req) => {
+    const ctx = needTenant(req, 'payment.read');
+    const patientId = idParam(req.params);
+    return tenantTx(app, ctx, async (db) => {
+      await requirePatient(db, ctx.orgId!, patientId);
+      return db.many(
+        `SELECT * FROM (
+           SELECT a.id AS appointment_id, a.service_id, s.name AS service_name, a.status, a.starts_at,
+                  to_char(a.starts_at AT TIME ZONE $3, 'YYYY-MM-DD') AS local_date, to_char(a.starts_at AT TIME ZONE $3, 'HH24:MI') AS local_time,
+                  a.price - ${netPaidSql('a', 'appointment_id')} AS outstanding
+             FROM appointments a LEFT JOIN therapy_services s ON s.organization_id = a.organization_id AND s.id = a.service_id
+            WHERE a.organization_id = $1 AND a.patient_id = $2 AND a.billing = 'per_sesi' AND a.price > 0
+              AND a.status IN ('selesai', 'terjadwal') AND NOT ${invoicedSql('a', 'appointment_id')}) x
+          WHERE outstanding > 0
+          ORDER BY status = 'terjadwal', starts_at`,
+        [ctx.orgId, patientId, ctx.timezone],
+      );
+    });
+  });
+
   // Pembayaran "umum" (tanpa tujuan) ditautkan sekali ke paket pasien yang sama, mis. pembayaran paket
   // yang dicatat sebelum paketnya dibuat. Nomor kuitansi, tanggal, dan nominal tidak berubah.
+  // newPackage: paket lama dibuat sekaligus (tanggal beli = tanggal bayar; dibayar di luar aplikasi = 0
+  // karena pembayaran ini yang melunasinya), dalam transaksi yang sama.
   app.post('/payments/:id/link', async (req) => {
     const ctx = needTenant(req, 'payment.record');
     const id = idParam(req.params);
-    const { patientPackageId } = parse(z.object({ patientPackageId: z.uuid() }), req.body);
-    await tenantTx(app, ctx, async (db) => {
-      const pay = await db.maybe<{ patientId: string; amount: number; status: string; receiptNo: string; targeted: boolean }>(
-        `SELECT patient_id, amount, status, receipt_no, num_nonnulls(patient_package_id, appointment_id, invoice_id) > 0 AS targeted
+    const body = parse(
+      z
+        .object({
+          patientPackageId: z.uuid().optional(),
+          newPackage: z.object({ packageTypeId: z.uuid(), sessionsRemaining: z.number().int().min(1).max(500), price: zPositiveMoney }).optional(),
+        })
+        .refine((b) => Boolean(b.patientPackageId) !== Boolean(b.newPackage), 'Pilih paket yang sudah ada atau isi paket lama baru'),
+      req.body,
+    );
+    if (body.newPackage && !can(ctx, 'package.sell')) throw forbidden();
+    return tenantTx(app, ctx, async (db) => {
+      const pay = await db.maybe<{ patientId: string; amount: number; status: string; receiptNo: string; paidOn: string; targeted: boolean }>(
+        `SELECT patient_id, amount, status, receipt_no, paid_on, num_nonnulls(patient_package_id, appointment_id, invoice_id) > 0 AS targeted
            FROM payments WHERE organization_id = $1 AND id = $2 FOR UPDATE`,
         [ctx.orgId, id],
       );
       if (!pay) throw notFound('Pembayaran');
       if (pay.status !== 'tercatat') throw conflict('Pembayaran ini sudah dibatalkan');
       if (pay.targeted) throw conflict('Pembayaran ini sudah untuk paket, sesi, atau invoice');
+      const patientPackageId = body.newPackage
+        ? (
+            await createPatientPackage(db, req, ctx, pay.patientId, {
+              packageTypeId: body.newPackage.packageTypeId,
+              purchasedOn: pay.paidOn,
+              carriedOver: { sessionsRemaining: body.newPackage.sessionsRemaining, price: body.newPackage.price, paidBefore: 0 },
+            })
+          ).id
+        : body.patientPackageId!;
       const pkg = await db.maybe<{ status: string; price: number; paid: number }>(
         `SELECT pp.status, pp.price, ${netPaidSql('pp', 'patient_package_id')} AS paid
            FROM patient_packages pp WHERE pp.organization_id = $1 AND pp.id = $2 AND pp.patient_id = $3 FOR UPDATE`,
@@ -245,8 +300,8 @@ export async function financeRoutes(app: FastifyInstance) {
       if (Number(pay.amount) > left) throw conflict(`Nominal pembayaran melebihi sisa tagihan paket (${rp(left)})`);
       await db.exec(`UPDATE payments SET patient_package_id = $3 WHERE organization_id = $1 AND id = $2`, [ctx.orgId, id, patientPackageId]);
       await audit(db, req, ctx, { action: 'pembayaran.ditautkan', entityType: 'payment', entityId: id, meta: { kuitansi: pay.receiptNo, paket_id: patientPackageId } });
+      return { patientPackageId };
     });
-    return { ok: true };
   });
 
   app.post('/payments/:id/void', async (req) => {

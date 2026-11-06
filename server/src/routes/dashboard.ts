@@ -88,7 +88,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
           `SELECT pp.id, pp.patient_id, p.full_name AS patient_name, p.patient_code, pp.name,
                   pp.sessions_total - pp.sessions_used AS sessions_remaining, pp.expires_on
              FROM patient_packages pp JOIN patients p ON p.organization_id = pp.organization_id AND p.id = pp.patient_id
-            WHERE pp.organization_id = $1 AND pp.status = 'aktif'
+            WHERE pp.organization_id = $1 AND pp.status = 'aktif' AND NOT pp.is_visit
               AND (pp.sessions_total - pp.sessions_used <= 2
                    OR (pp.expires_on IS NOT NULL AND pp.expires_on <= (now() AT TIME ZONE $2)::date + 14))
             ORDER BY pp.sessions_total - pp.sessions_used, pp.expires_on NULLS LAST LIMIT 20`,

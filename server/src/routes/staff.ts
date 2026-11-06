@@ -30,6 +30,8 @@ const memberPatch = z.object({
   role: assignableRole.optional(),
   isTherapist: z.boolean().optional(),
   handlesFinance: z.boolean().optional(),
+  // Hanya untuk admin: boleh mengubah layanan & tarif serta jenis & harga paket.
+  managesCatalog: z.boolean().optional(),
   specialization: zOptText(120).optional(),
 });
 
@@ -42,11 +44,12 @@ interface MemberRow {
   status: string;
   isTherapist: boolean;
   handlesFinance: boolean;
+  managesCatalog: boolean;
 }
 
 async function loadEditableMember(db: Db, orgId: string, memberId: string, selfMemberId: string | null): Promise<MemberRow> {
   const m = await db.maybe<MemberRow>(
-    `SELECT id, user_id, role, status, is_therapist, handles_finance FROM memberships WHERE organization_id = $1 AND id = $2 FOR UPDATE`,
+    `SELECT id, user_id, role, status, is_therapist, handles_finance, manages_catalog FROM memberships WHERE organization_id = $1 AND id = $2 FOR UPDATE`,
     [orgId, memberId],
   );
   // Akun wali dikelola dari data wali di halaman pasien, bukan sebagai staf.
@@ -61,7 +64,7 @@ export async function staffRoutes(app: FastifyInstance) {
     const ctx = needTenant(req, 'staff.read');
     const rows = await tenantTx(app, ctx, (db) =>
       db.many<{ role: Role; handlesFinance: boolean }>(
-        `SELECT m.id, m.user_id, u.full_name, u.email, u.username, u.phone, m.role, m.status, m.is_therapist, m.handles_finance, m.specialization,
+        `SELECT m.id, m.user_id, u.full_name, u.email, u.username, u.phone, m.role, m.status, m.is_therapist, m.handles_finance, m.manages_catalog, m.specialization,
                 m.created_at, m.deactivated_at, u.last_login_at
            FROM memberships m JOIN users u ON u.id = m.user_id
           WHERE m.organization_id = $1 AND m.role <> 'wali'
@@ -176,13 +179,15 @@ export async function staffRoutes(app: FastifyInstance) {
       const role = patch.role ?? m.role;
       const isTherapist = role === 'terapis' ? true : (patch.isTherapist ?? m.isTherapist);
       if (patch.handlesFinance && role !== 'admin') throw badRequest(ONLY_ADMIN_FINANCE);
-      // Pindah dari admin ke peran lain otomatis melepas rangkap keuangan.
+      if (patch.managesCatalog && role !== 'admin') throw badRequest('Hanya peran admin yang dapat diberi akses mengubah harga');
+      // Pindah dari admin ke peran lain otomatis melepas rangkap keuangan dan akses harga.
       const handlesFinance = role === 'admin' ? (patch.handlesFinance ?? m.handlesFinance) : false;
+      const managesCatalog = role === 'admin' ? (patch.managesCatalog ?? m.managesCatalog) : false;
       await db.exec(
         `UPDATE memberships SET role = $3, is_therapist = $4, handles_finance = $5,
-                specialization = CASE WHEN $6::boolean THEN $7 ELSE specialization END, updated_by = $8
+                specialization = CASE WHEN $6::boolean THEN $7 ELSE specialization END, updated_by = $8, manages_catalog = $9
           WHERE organization_id = $1 AND id = $2`,
-        [ctx.orgId, id, role, isTherapist, handlesFinance, patch.specialization !== undefined, patch.specialization ?? null, ctx.userId],
+        [ctx.orgId, id, role, isTherapist, handlesFinance, patch.specialization !== undefined, patch.specialization ?? null, ctx.userId, managesCatalog],
       );
       await audit(db, req, ctx, {
         action: 'staf.diubah',
@@ -194,6 +199,8 @@ export async function staffRoutes(app: FastifyInstance) {
           terapis: isTherapist,
           keuangan_sebelum: m.handlesFinance,
           keuangan_sesudah: handlesFinance,
+          ubah_harga_sebelum: m.managesCatalog,
+          ubah_harga_sesudah: managesCatalog,
         },
       });
       return { ok: true };
