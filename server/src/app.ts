@@ -134,10 +134,10 @@ export async function buildApp(
     }
   });
 
-  app.addHook('preHandler', async (req) => {
+  app.addHook('preHandler', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
     if (NO_SESSION_ROUTES.has(req.routeOptions?.url ?? '')) return;
-    req.auth = await resolveAuth(app, req);
+    req.auth = await resolveAuth(app, req, reply);
     if (!SAFE_METHODS.has(req.method)) checkCsrf(req);
   });
 

@@ -22,7 +22,7 @@ npm install
 npm run db:init        # cluster PostgreSQL khusus proyek (port 54330), role rtka_owner + rtka_app, menulis .env
 npm run db:migrate     # menerapkan server/migrations/*.sql
 npm run seed:demo      # opsional: dua organisasi DEMO berisi data sintetis
-npm test               # 239 test (database uji dibuat ulang setiap kali)
+npm test               # 243 test (database uji dibuat ulang setiap kali)
 
 npm run dev:server     # API di http://127.0.0.1:3000
 npm run dev:web        # UI di http://localhost:5173 (proxy /api ke :3000)

@@ -694,3 +694,25 @@ penggabungan jadwal terbuka, atau sisa tagihan dihitung tanpa izin pembayaran, m
 menggagalkan test. Diperiksa di browser (lebar desktop dan 390 px): terapis melihat jadwal besok
 tanpa terapis; owner melihat tanda belum dibayar, *Catat bayar* menghapus tandanya; Buat jadwal
 memilih paket otomatis.
+
+## 30. Login tidak keluar otomatis (8 Nov 2026)
+
+**Keluhan:** pengguna sering harus login ulang. Catatan sesi 7 hari menunjukkan penyebabnya: batas
+idle 12 jam (membuka aplikasi keesokan hari), komputer Windows dipakai bergantian (keluar-masuk akun),
+dan login terpisah per perangkat. **Keputusan owner:** pengguna tidak keluar sama sekali kecuali
+menekan Keluar.
+
+- Bawaan baru: `SESSION_IDLE_MINUTES=0` (tanpa batas idle) dan `SESSION_MAX_DAYS=400`. Masa berlaku
+  sesi dan cookie **diperpanjang otomatis** paling sering sekali sehari setiap kali sesi dipakai,
+  sehingga hanya sesi yang tidak dipakai 400 hari yang berakhir (400 hari = batas umur cookie Chrome).
+- Sesi tetap berakhir bila: pengguna menekan **Keluar** atau **Keluar dari semua perangkat**, kata
+  sandi diganti/direset (sesi lain ditutup), atau akun dinonaktifkan. Batas idle dapat diaktifkan
+  lagi lewat `SESSION_IDLE_MINUTES` tanpa ubah kode.
+- Sesi lama yang belum dicabut dan belum lewat 14 hari menjadi berlaku lagi dan ikut diperpanjang.
+- Risiko diterima owner: di komputer bersama, browser tetap masuk sebagai akun terakhir. Saran:
+  profil Chrome terpisah per orang.
+
+**Bukti:** 4 test baru (`sesi-login.test.ts`): diam 30 hari tetap masuk dan diperpanjang 400 hari
+(cookie ikut diperbarui, sekali sehari); Keluar tetap menang walau perpanjangan jatuh pada permintaan
+yang sama; sesi kedaluwarsa ditolak; batas idle tetap berfungsi bila diatur. Total 243 lulus. Uji
+mutasi: tanpa perpanjangan sesi, atau tanpa pembaruan cookie, masing-masing menggagalkan test.

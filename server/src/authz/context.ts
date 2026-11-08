@@ -55,6 +55,7 @@ interface SessionRow {
   supportGrantId: string | null;
   csrfToken: string;
   lastSeenAt: Date;
+  renewDue: boolean;
 }
 
 async function setLocal(db: Db, settings: Record<string, string>): Promise<void> {
@@ -67,18 +68,22 @@ export { setLocal };
 
 // Dipanggil pada setiap permintaan /api. Tidak ada cache: penonaktifan staf,
 // pencabutan sesi, dan kedaluwarsa akses dukungan berlaku seketika.
-export async function resolveAuth(app: FastifyInstance, req: FastifyRequest): Promise<AuthContext | null> {
+// Sesi berakhir hanya bila pengguna keluar, sandi diganti/direset, akun dinonaktifkan, atau tidak dipakai
+// selama sessionMaxDays. Masa berlaku sesi dan cookie diperpanjang paling sering sekali sehari.
+export async function resolveAuth(app: FastifyInstance, req: FastifyRequest, reply?: FastifyReply): Promise<AuthContext | null> {
   const token = req.cookies[SESSION_COOKIE];
   if (!token || token.length > 200) return null;
   const tokenHash = sha256Hex(token);
+  const { sessionIdleMinutes: idle, sessionMaxDays: maxDays } = app.config;
 
   return withTx(app.pool, { settings: { 'app.mode': 'session' } }, async (db) => {
     const s = await db.maybe<SessionRow>(
-      `SELECT id, user_id, organization_id, support_grant_id, csrf_token, last_seen_at
+      `SELECT id, user_id, organization_id, support_grant_id, csrf_token, last_seen_at,
+              expires_at < now() + make_interval(days => $3) - interval '1 day' AS renew_due
          FROM sessions
         WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
-          AND last_seen_at > now() - make_interval(mins => $2)`,
-      [tokenHash, app.config.sessionIdleMinutes],
+          AND ($2 = 0 OR last_seen_at > now() - make_interval(mins => $2))`,
+      [tokenHash, idle, maxDays],
     );
     if (!s) return null;
 
@@ -185,7 +190,10 @@ export async function resolveAuth(app: FastifyInstance, req: FastifyRequest): Pr
       };
     }
 
-    if (Date.now() - s.lastSeenAt.getTime() > 60_000) {
+    if (s.renewDue) {
+      await db.exec(`UPDATE sessions SET last_seen_at = now(), expires_at = now() + make_interval(days => $2) WHERE id = $1`, [s.id, maxDays]);
+      if (reply) setSessionCookie(app, reply, token);
+    } else if (Date.now() - s.lastSeenAt.getTime() > 60_000) {
       await db.exec(`UPDATE sessions SET last_seen_at = now() WHERE id = $1`, [s.id]);
     }
     return ctx;

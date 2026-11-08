@@ -12,7 +12,7 @@ lalu memisahkannya dari hal yang **belum** dapat dibuktikan.
 | Least privilege klinis | Terapis hanya mengakses pasien yang ditugaskan. Admin dan keuangan tidak dapat membaca catatan (403 di API, 0 baris di DB) | `therapy.test.ts` |
 | Kata sandi | scrypt (N=2¹⁵, r=8, p=3) dengan salt per pengguna. Minimal 10 karakter. Tidak ada kata sandi default | `auth.test.ts` |
 | Login | Pesan gagal generik, kunci 15 menit setelah 5 kali gagal, rate limit per IP | `auth.test.ts` |
-| Sesi | Token acak 256-bit, hanya hash SHA-256 yang disimpan. Cookie `httpOnly`, `SameSite=Lax`, `Secure` di produksi. Idle timeout 12 jam, maksimum 14 hari | `auth.test.ts` |
+| Sesi | Token acak 256-bit, hanya hash SHA-256 yang disimpan. Cookie `httpOnly`, `SameSite=Lax`, `Secure` di produksi. Tidak keluar otomatis (keputusan owner 8 Nov 2026): sesi berakhir bila pengguna keluar, sandi diganti/direset, akun dinonaktifkan, atau tidak dipakai 400 hari (diperpanjang setiap hari dipakai). Batas idle dapat diaktifkan lewat `SESSION_IDLE_MINUTES` | `auth.test.ts`, `sesi-login.test.ts` |
 | Pencabutan | Logout, logout semua perangkat, nonaktif staf, ganti/reset sandi, dan cabut akses dukungan berlaku pada permintaan berikutnya | `auth.test.ts`, `support.test.ts` |
 | CSRF | Token CSRF per sesi untuk setiap permintaan yang mengubah data, cek `Origin`, dan tolak `Sec-Fetch-Site: cross-site` | `auth.test.ts` |
 | Header | CSP ketat (`self`, `frame-ancestors 'none'`), `nosniff`, `Referrer-Policy: no-referrer`, HSTS di produksi, `Cache-Control: no-store` untuk API | `auth.test.ts` |
@@ -61,8 +61,10 @@ lalu memisahkannya dari hal yang **belum** dapat dibuktikan.
 - Belum ada pemantauan/alerting produksi.
 - **Kebijakan retensi data** (berapa lama catatan klinis disimpan dan kapan dihapus)
   belum ditetapkan. Lihat keputusan terbuka.
-- Akun dengan perangkat bersama: idle timeout 12 jam dapat diperketat bila perangkat
-  dipakai bergantian (`SESSION_IDLE_MINUTES`).
+- Perangkat bersama: karena tidak keluar otomatis, siapa pun yang membuka browser itu masuk
+  sebagai akun terakhir. Gunakan profil Chrome terpisah per orang, keluar setelah memakai, atau
+  aktifkan batas idle (`SESSION_IDLE_MINUTES`). Perangkat hilang: *Profil → Keluar dari semua
+  perangkat* atau ganti kata sandi.
 
 ## Prinsip operasional
 

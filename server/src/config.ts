@@ -32,7 +32,9 @@ export interface Config {
   publicBaseUrl: string;
   cookieSecure: boolean;
   trustProxy: boolean;
+  // 0 = tanpa batas idle: sesi hanya berakhir bila pengguna keluar (keputusan owner 8 Nov 2026).
   sessionIdleMinutes: number;
+  // Masa berlaku sesi sejak terakhir dipakai; diperpanjang otomatis setiap hari sesi dipakai.
   sessionMaxDays: number;
   uploadDir: string;
   maxUploadBytes: number;
@@ -59,10 +61,10 @@ function bool(value: string | undefined, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
 }
 
-function int(value: string | undefined, fallback: number): number {
+function int(value: string | undefined, fallback: number, min = 1): number {
   if (value === undefined || value === '') return fallback;
   const n = Number.parseInt(value, 10);
-  if (!Number.isFinite(n) || n <= 0) throw new Error(`Nilai angka tidak valid: ${value}`);
+  if (!Number.isFinite(n) || n < min) throw new Error(`Nilai angka tidak valid: ${value}`);
   return n;
 }
 
@@ -101,8 +103,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     publicBaseUrl: (env.PUBLIC_BASE_URL ?? appOrigins[0]).replace(/\/$/, ''),
     cookieSecure: bool(env.COOKIE_SECURE, isProd),
     trustProxy: bool(env.TRUST_PROXY, isProd),
-    sessionIdleMinutes: int(env.SESSION_IDLE_MINUTES, 720),
-    sessionMaxDays: int(env.SESSION_MAX_DAYS, 14),
+    sessionIdleMinutes: int(env.SESSION_IDLE_MINUTES, 0, 0),
+    // 400 hari = batas umur cookie di Chrome; karena terus diperpanjang, praktis tidak pernah habis.
+    sessionMaxDays: int(env.SESSION_MAX_DAYS, 400),
     uploadDir,
     // 4 MB: di bawah batas body Vercel Functions (4,5 MB) dan batas unggah Supabase Free (50 MB).
     maxUploadBytes: int(env.MAX_UPLOAD_MB, 4) * MB,

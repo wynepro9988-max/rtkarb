@@ -46,7 +46,7 @@ atau paling netral**. Default ini bukan aturan bisnis yang sudah disetujui.
 | A1 | Co-owner | Hanya satu jalur pembuatan owner (CLI). Owner tidak dapat menambah owner lain | Perlu lebih dari satu owner per organisasi? |
 | A1b | Admin mengubah harga | **Diputuskan 6 Nov:** owner dapat memberi admin tertentu akses mengubah layanan & tarif serta jenis & harga paket (Staf → Ubah). Pengaturan organisasi lain, diskon, dan honor tetap owner | — |
 | A2 | Satu akun satu organisasi | Email yang sudah terdaftar tidak dapat diundang organisasi lain | Sesuai keputusan awal. Pemindahan lintas organisasi di luar cakupan |
-| A3 | Durasi sesi login | Idle 12 jam, maksimum 14 hari | Lebih ketat untuk perangkat bersama? |
+| A3 | Durasi sesi login | **Diputuskan 8 Nov:** tidak keluar otomatis; sesi berakhir bila pengguna keluar, sandi diganti/direset, akun dinonaktifkan, atau tidak dipakai 400 hari | — |
 | A4 | Notifikasi | **Sekali klik** (wa.me/mailto) **dan otomatis lewat Fonnte (29 Okt)**: tiap owner menghubungkan nomornya sendiri dan menetapkan berapa jam sebelum sesi pertama pengingat dikirim (default 3 jam). **Diputuskan 29 Okt:** satu pesan per anak per hari, memuat semua jam sesinya. Nonaktif sampai owner mengaktifkan | Nomor WhatsApp khusus per organisasi; paket Fonnte (kuota); cara memberi tahu wali bahwa datanya diproses Fonnte; apakah menerima risiko gateway tidak resmi atau beralih ke WhatsApp Business API resmi |
 | A5 | Admin teknis | Belum ada akun admin teknis. Dibuat via CLI bila perlu | Siapa yang menjadi admin teknis? Siapa selain owner yang boleh menyetujui akses? |
 | A6 | Penanggung jawab rollback & insiden | Belum ditetapkan | Nama dan kontak |
