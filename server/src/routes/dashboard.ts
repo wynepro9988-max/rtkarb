@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { can, needTenant, tenantTx } from '../authz/context.ts';
 import { dataScopes } from '../authz/permissions.ts';
 import { noteDeadlineSql, noteNotFinalSql, noteOverdueSql } from '../lib/note-deadline.ts';
-import { APPT_FROM, APPT_SELECT } from './appointments.ts';
+import { APPT_FROM, APPT_SELECT, byStart, openAppointments } from './appointments.ts';
 
 export async function dashboardRoutes(app: FastifyInstance) {
   app.get('/dashboard', async (req) => {
@@ -19,7 +19,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
       const out: Record<string, unknown> = { today: today.d };
 
       if (can(ctx, 'schedule.read', 'schedule.read.own')) {
-        out.todayAppointments = await db.many(
+        const appts = await db.many<{ startsAt: Date }>(
           `SELECT ${APPT_SELECT.replaceAll('$TZ', '$2')} ${APPT_FROM}
             WHERE a.organization_id = $1
               AND a.starts_at >= ($3::date)::timestamp AT TIME ZONE $2
@@ -29,6 +29,8 @@ export async function dashboardRoutes(app: FastifyInstance) {
             ORDER BY a.starts_at`,
           [ctx.orgId, ctx.timezone, today.d, ownOnly ? ctx.memberId : null],
         );
+        // Terapis juga melihat jadwal hari ini yang belum memiliki terapis.
+        out.todayAppointments = ownOnly ? [...appts, ...(await openAppointments(db, ctx, today.d, today.d))].sort(byStart) : appts;
         out.monthSessions = await db.one(
           `SELECT count(*) FILTER (WHERE status = 'selesai') AS completed,
                   count(*) FILTER (WHERE status = 'tidak_hadir') AS no_show,

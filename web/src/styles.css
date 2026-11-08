@@ -253,7 +253,9 @@ table.table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
 .appt:last-child { border-bottom: none; }
 .appt .time { font-weight: 800; font-size: 1.05rem; font-variant-numeric: tabular-nums; color: var(--c-primary-strong); }
 .appt .time small { display: block; color: var(--c-subtle); font-weight: 600; font-size: 0.76rem; }
+.appt .who { min-width: 0; }
 .appt .who strong { display: block; }
+.appt .who .badge { white-space: normal; }
 .appt .who span { color: var(--c-muted); font-size: 0.875rem; }
 .day-head { padding: 10px 20px; background: var(--c-surface-2); border-bottom: 1px solid var(--c-border); font-weight: 700; font-size: 0.9rem; color: var(--c-muted); }
 

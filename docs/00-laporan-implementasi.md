@@ -667,3 +667,30 @@ dibuat dengan data minimal, dan tunjangan operasional terapis menjadi per hari h
 sesi tanpa biaya, paket tidak terpotong, tidak jadi tagihan, catatan penulis terapis, honor,
 tunjangan harian, audit); impor ulang tidak menggandakan; bukan owner ditolak dan kesalahan satu
 baris membatalkan semuanya. Total 234 lulus.
+
+## 29. Jadwal tanpa terapis terlihat terapis, dan sisa tagihan di jadwal (8 Nov 2026)
+
+**Laporan pengguna:** terapis tidak melihat jadwal besok yang sudah dibuat admin. Penyebabnya, jadwal
+dibuat dengan terapis "Ditentukan saat absen" (§24), sedangkan terapis hanya melihat jadwal atas
+namanya. **Keputusan owner:** jadwal tanpa terapis ikut tampil di jadwal semua terapis dengan tanda
+*Belum ada terapis*. Untuk pasien yang belum bayar: jadwal tetap boleh dibuat; tagihannya terlihat.
+
+- `GET /appointments` dan dasbor: terapis juga menerima jadwal **terjadwal tanpa terapis** lewat
+  fungsi `app_open_appointments` yang sudah dipakai Absen (identitas ringkas: nama, No. RM, layanan,
+  waktu; tanpa tagihan, harga, atau catatan admin). Profil pasien tetap tertutup sampai terapis
+  mengabsen anak itu. Tidak ada migrasi.
+- Baris jadwal bertanda **Belum ada terapis**; tombol *Absen* hanya untuk hari ini/sebelumnya dan
+  membuka halaman Absen pada tanggal jadwal.
+- **Sisa tagihan** (`outstanding`) dihitung hanya bagi yang berizin melihat pembayaran (owner,
+  keuangan, admin dengan akses keuangan): per sesi = tarif sesi dikurangi yang sudah dibayar;
+  paket = sisa harga paketnya. Yang sudah masuk invoice, tanpa biaya, batal, atau dipindah tidak
+  ditandai. Baris bertanda *Belum dibayar Rp…* / *Paket belum lunas, kurang Rp…* dengan tombol
+  **Catat bayar** (formulir pembayaran terisi pasien, tujuan, dan nominal).
+- *Buat jadwal*: setelah pasien dipilih, tagihan otomatis **Paket** bila anak punya paket aktif
+  (terpilih langsung bila hanya satu), selain itu **Per sesi**.
+
+**Bukti:** 5 test baru (`jadwal-terapis-tagihan.test.ts`), total 239 lulus. Uji mutasi: tanpa
+penggabungan jadwal terbuka, atau sisa tagihan dihitung tanpa izin pembayaran, masing-masing
+menggagalkan test. Diperiksa di browser (lebar desktop dan 390 px): terapis melihat jadwal besok
+tanpa terapis; owner melihat tanda belum dibayar, *Catat bayar* menghapus tandanya; Buat jadwal
+memilih paket otomatis.

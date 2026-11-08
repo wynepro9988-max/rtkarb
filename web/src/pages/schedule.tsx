@@ -5,6 +5,7 @@ import { useAuth } from '../auth.tsx';
 import { addDays, APPT_STATUS, BILLING, formatRupiah, formatWeekday, todayIn } from '../format.ts';
 import { Badge, Dialog, Empty, ErrorBox, Field, Icon, Loading, MoneyInput, PageHeader, ReasonDialog, useSubmit, useToast } from '../ui.tsx';
 import { SessionMediaDialog } from '../components/session-media.tsx';
+import { PaymentDialog } from './finance.tsx';
 import { searchPatients } from './patients.tsx';
 
 export function SchedulePage() {
@@ -94,12 +95,15 @@ export function SchedulePage() {
 function AppointmentRow({ a, onChanged }: { a: any; onChanged: () => void }) {
   const { can, me } = useAuth();
   const toast = useToast();
-  const [dialog, setDialog] = useState<null | 'cancel' | 'reopen' | 'reschedule' | 'media'>(null);
+  const [dialog, setDialog] = useState<null | 'cancel' | 'reopen' | 'reschedule' | 'media' | 'pay'>(null);
   const [busy, setBusy] = useState(false);
+  const today = todayIn(me?.organization?.timezone);
   const own = Boolean(a.therapistMemberId) && a.therapistMemberId === me?.membership?.id;
-  // Jadwal tanpa terapis diselesaikan lewat Absen (terapis dipilih saat itu).
+  // Jadwal tanpa terapis diselesaikan lewat Absen (terapis dipilih saat itu). Terapis melihatnya
+  // dengan identitas ringkas saja; data pasien terbuka setelah ia mengabsen anak itu.
   const unassigned = !a.therapistMemberId;
   const canRecord = !unassigned && (can('session.complete') || (can('session.complete.own') && own));
+  const linkPatient = Boolean(a.patientId) && (can('patient.read') || (can('patient.read.assigned') && !unassigned));
 
   const act = async (path: string, message: string) => {
     setBusy(true);
@@ -122,20 +126,26 @@ function AppointmentRow({ a, onChanged }: { a: any; onChanged: () => void }) {
       </div>
       <div className="who">
         <strong>
-          {a.patientId && can('patient.read', 'patient.read.assigned') ? <Link to={`/pasien/${a.patientId}`}>{a.patientName}</Link> : (a.patientName ?? 'Pasien')}
+          {linkPatient ? <Link to={`/pasien/${a.patientId}`}>{a.patientName}</Link> : (a.patientName ?? 'Pasien')}
         </strong>
         <span>
           {a.patientCode ? <span className="mono">{a.patientCode} · </span> : null}
-          {a.serviceName ?? 'Sesi terapi'} · {a.therapistName ?? 'terapis belum ditentukan'} · {BILLING[a.billing]}
+          {a.serviceName ?? 'Sesi terapi'}
+          {a.therapistName ? ` · ${a.therapistName}` : ''}
+          {a.billing ? ` · ${BILLING[a.billing]}` : ''}
           {a.packageName ? ` (${a.packageName})` : ''}
           {a.billing === 'per_sesi' && a.price ? ` · ${formatRupiah(a.price)}` : ''}
         </span>
         <div className="row" style={{ marginTop: 6 }}>
           <Badge tone={APPT_STATUS[a.status]?.tone}>{APPT_STATUS[a.status]?.label}</Badge>
+          {a.status === 'terjadwal' && unassigned ? <Badge tone="warn">Belum ada terapis</Badge> : null}
+          {a.outstanding > 0 ? (
+            <Badge tone="warn">{a.billing === 'paket' ? `Paket belum lunas, kurang ${formatRupiah(a.outstanding)}` : `Belum dibayar ${formatRupiah(a.outstanding)}`}</Badge>
+          ) : null}
           {a.cancelReason ? <span className="small muted">{a.cancelReason}</span> : null}
           {a.status === 'selesai' && a.noteStatus !== 'final' && can('therapy.note.read', 'therapy.note.read.assigned') ? (
             // Batas wajib catatan final: akhir bulan sesi.
-            a.localDate.slice(0, 7) < todayIn(me?.organization?.timezone).slice(0, 7) ? (
+            a.localDate.slice(0, 7) < today.slice(0, 7) ? (
               <Badge tone="danger">{a.noteId ? 'Catatan draf, lewat batas' : 'Belum ada catatan, lewat batas'}</Badge>
             ) : (
               <Badge tone="warn">{a.noteId ? 'Catatan masih draf' : 'Belum ada catatan'}</Badge>
@@ -144,10 +154,16 @@ function AppointmentRow({ a, onChanged }: { a: any; onChanged: () => void }) {
         </div>
       </div>
       <div className="actions row">
-        {a.status === 'terjadwal' && unassigned && can('session.log.own', 'session.complete') ? (
-          <Link className="btn btn-sm" to={`/absen?jadwal=${a.id}`}>
+        {/* Absen hanya untuk hari ini atau sebelumnya; halaman Absen dibuka pada tanggal jadwal. */}
+        {a.status === 'terjadwal' && unassigned && a.localDate <= today && can('session.log.own', 'session.complete') ? (
+          <Link className="btn btn-sm" to={`/absen?jadwal=${a.id}&tanggal=${a.localDate}`}>
             <Icon name="check" /> Absen
           </Link>
+        ) : null}
+        {a.outstanding > 0 && can('payment.record') ? (
+          <button className="btn btn-sm btn-secondary" onClick={() => setDialog('pay')}>
+            Catat bayar
+          </button>
         ) : null}
         {a.status === 'selesai' && can('therapy.note.read', 'therapy.note.read.assigned') ? (
           <button className="btn btn-sm btn-ghost" onClick={() => setDialog('media')}>
@@ -218,6 +234,16 @@ function AppointmentRow({ a, onChanged }: { a: any; onChanged: () => void }) {
         />
       ) : null}
       {dialog === 'reschedule' ? <RescheduleDialog a={a} onClose={() => setDialog(null)} onSaved={onChanged} /> : null}
+      {dialog === 'pay' ? (
+        <PaymentDialog
+          presetPatient={{ id: a.patientId, fullName: a.patientName, patientCode: a.patientCode }}
+          presetPackageId={a.billing === 'paket' ? a.patientPackageId : undefined}
+          presetAppointmentId={a.billing === 'per_sesi' ? a.id : undefined}
+          presetAmount={a.outstanding}
+          onClose={() => setDialog(null)}
+          onSaved={onChanged}
+        />
+      ) : null}
       {dialog === 'media' ? (
         <SessionMediaDialog
           appointmentId={a.id}
@@ -363,7 +389,13 @@ export function AppointmentDialog({
   useEffect(() => {
     if (!patient) return setPackages([]);
     get<any[]>(`/patients/${patient.id}/packages`).then(
-      (rows) => setPackages(rows.filter((p) => p.status === 'aktif' && p.sessionsRemaining > 0 && !p.expired)),
+      (rows) => {
+        const usable = rows.filter((p) => p.status === 'aktif' && p.sessionsRemaining > 0 && !p.expired);
+        setPackages(usable);
+        // Anak yang punya paket aktif dijadwalkan dengan paketnya (terpilih otomatis bila hanya satu);
+        // tanpa paket, ditagih per sesi. Belum dibayar tidak menghalangi jadwal.
+        setF((cur) => ({ ...cur, billing: usable.length ? 'paket' : 'per_sesi', patientPackageId: usable.length === 1 ? usable[0].id : '' }));
+      },
       () => setPackages([]),
     );
   }, [patient]);
@@ -477,7 +509,9 @@ export function AppointmentDialog({
             </Field>
           ) : null}
           {f.billing === 'per_sesi' ? (
-            <Field label="Tarif sesi (Rp)">{(id) => <MoneyInput id={id} value={f.price} onChange={(v) => setF({ ...f, price: v })} />}</Field>
+            <Field label="Tarif sesi (Rp)" hint="Boleh dibayar saat datang atau sesudahnya">
+              {(id) => <MoneyInput id={id} value={f.price} onChange={(v) => setF({ ...f, price: v })} />}
+            </Field>
           ) : null}
           <Field label="Catatan administrasi" full>
             {(id) => <input id={id} className="input" value={f.adminNotes} onChange={(e) => setF({ ...f, adminNotes: e.target.value })} maxLength={1000} placeholder="Opsional, non-klinis" />}

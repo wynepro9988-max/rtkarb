@@ -5,6 +5,7 @@ import { can, needTenant, tenantTx, type AuthContext } from '../authz/context.ts
 import type { Db } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { idParam, parse, zDate, zMoney, zOptText, zText, zTime } from '../http.ts';
+import { invoicedSql, netPaidSql } from '../lib/money-sql.ts';
 import { requirePatient } from './patients.ts';
 
 const createBody = z.object({
@@ -52,6 +53,35 @@ export const APPT_FROM = `
   LEFT JOIN therapy_services s ON s.organization_id = a.organization_id AND s.id = a.service_id
   LEFT JOIN patient_packages pp ON pp.organization_id = a.organization_id AND pp.id = a.patient_package_id
   LEFT JOIN therapy_notes n ON n.organization_id = a.organization_id AND n.appointment_id = a.id`;
+
+// Sisa tagihan jadwal (untuk yang berizin melihat pembayaran): per sesi = tarif sesi, paket = sisa harga
+// paketnya. Yang sudah masuk invoice ditagih lewat invoice; jadwal batal/dipindah tidak ditagih.
+const OUTSTANDING_SQL = `CASE
+    WHEN a.status NOT IN ('terjadwal', 'selesai') THEN NULL
+    WHEN a.billing = 'per_sesi' AND a.price > 0 AND NOT ${invoicedSql('a', 'appointment_id')}
+      THEN greatest(a.price - ${netPaidSql('a', 'appointment_id')}, 0)::bigint
+    WHEN a.billing = 'paket' AND pp.status <> 'dibatalkan' AND pp.price > 0 AND NOT ${invoicedSql('pp', 'patient_package_id')}
+      THEN greatest(pp.price - ${netPaidSql('pp', 'patient_package_id')}, 0)::bigint
+  END`;
+
+// Jadwal tanpa terapis dalam rentang tanggal lokal, dengan bentuk baris yang sama seperti APPT_SELECT
+// (identitas ringkas saja, seperti di Absen). Untuk terapis, yang tidak dapat membaca jadwal semua orang.
+export function openAppointments(db: Db, ctx: AuthContext, from: string, to: string, patientId: string | null = null) {
+  return db.many<{ startsAt: Date }>(
+    `SELECT id, patient_id, full_name AS patient_name, patient_code, NULL::uuid AS therapist_member_id, NULL AS therapist_name,
+            service_id, service_name, starts_at,
+            to_char(starts_at AT TIME ZONE $1, 'YYYY-MM-DD') AS local_date, to_char(starts_at AT TIME ZONE $1, 'HH24:MI') AS local_time,
+            duration_minutes, 'terjadwal' AS status, NULL AS billing, NULL::uuid AS patient_package_id, NULL AS package_name,
+            NULL::bigint AS price, NULL AS cancel_reason, NULL AS admin_notes, NULL::uuid AS rescheduled_from_id,
+            NULL::timestamptz AS completed_at, NULL::uuid AS note_id, NULL AS note_status, NULL::bigint AS outstanding
+       FROM app_open_appointments(($2::date)::timestamp AT TIME ZONE $1, ($3::date + 1)::timestamp AT TIME ZONE $1)
+      WHERE $4::uuid IS NULL OR patient_id = $4
+      ORDER BY starts_at`,
+    [ctx.timezone, from, to, patientId],
+  );
+}
+
+export const byStart = (x: { startsAt: Date }, y: { startsAt: Date }) => x.startsAt.getTime() - y.startsAt.getTime();
 
 export interface ApptRow {
   id: string;
@@ -206,11 +236,12 @@ export async function appointmentRoutes(app: FastifyInstance) {
         .refine((r) => r.from <= r.to && (Date.parse(r.to) - Date.parse(r.from)) / 86_400_000 <= 62, 'Rentang maksimal 62 hari'),
       req.query,
     );
-    // Terapis hanya melihat jadwal yang ia tangani.
+    // Terapis melihat jadwal yang ia tangani dan jadwal yang belum memiliki terapis.
     const ownOnly = !can(ctx, 'schedule.read');
-    return tenantTx(app, ctx, (db) =>
-      db.many(
-        `SELECT ${APPT_SELECT.replaceAll('$TZ', '$2')} ${APPT_FROM}
+    const outstanding = can(ctx, 'payment.read') ? OUTSTANDING_SQL : 'NULL::bigint';
+    return tenantTx(app, ctx, async (db) => {
+      const rows = await db.many<{ startsAt: Date }>(
+        `SELECT ${APPT_SELECT.replaceAll('$TZ', '$2')}, ${outstanding} AS outstanding ${APPT_FROM}
           WHERE a.organization_id = $1
             AND a.starts_at >= ($3::date)::timestamp AT TIME ZONE $2
             AND a.starts_at < ($4::date + 1)::timestamp AT TIME ZONE $2
@@ -219,8 +250,10 @@ export async function appointmentRoutes(app: FastifyInstance) {
             AND ($7::text IS NULL OR a.status = $7)
           ORDER BY a.starts_at, u.full_name`,
         [ctx.orgId, ctx.timezone, q.from, q.to, ownOnly ? ctx.memberId : (q.therapistId ?? null), q.patientId ?? null, q.status ?? null],
-      ),
-    );
+      );
+      if (!ownOnly || (q.status && q.status !== 'terjadwal')) return rows;
+      return [...rows, ...(await openAppointments(db, ctx, q.from, q.to, q.patientId ?? null))].sort(byStart);
+    });
   });
 
   app.get('/appointments/:id', async (req) => {

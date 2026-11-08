@@ -33,7 +33,7 @@ const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${S
 const SHORT_STATUS: Record<string, string> = { selesai: 'Selesai', tidak_hadir: 'Tidak hadir', dibatalkan: 'Batal' };
 
 // Papan waktu hari ini: satu baris per terapis, blok per sesi, bintang jingga = sekarang.
-function DayBoard({ appts, now, linkPatients }: { appts: any[]; now: number; linkPatients: boolean }) {
+function DayBoard({ appts, now, linkable }: { appts: any[]; now: number; linkable: (a: any) => boolean }) {
   const starts = appts.map((a) => toMinutes(a.localTime));
   const ends = appts.map((a, i) => starts[i] + a.durationMinutes);
   const from = Math.min(8, ...starts.map((m) => Math.floor(m / 60))) * 60;
@@ -83,8 +83,9 @@ function DayBoard({ appts, now, linkPatients }: { appts: any[]; now: number; lin
                     </span>
                   </>
                 );
-                // Pasien di luar cakupan peran tidak bernama (disembunyikan RLS), jadi tidak ditautkan.
-                return linkPatients && a.patientName ? (
+                // Pasien di luar cakupan peran tidak bernama (disembunyikan RLS) atau, bagi terapis, berasal
+                // dari jadwal tanpa terapis (identitas ringkas saja), jadi tidak ditautkan.
+                return linkable(a) && a.patientName ? (
                   <Link key={a.id} to={`/pasien/${a.patientId}`} className={`daybar-block ${a.status}`} style={style} aria-label={label} title={label}>
                     {body}
                   </Link>
@@ -199,7 +200,7 @@ export function DashboardPage() {
           ) : (
             <>
               <div className="only-wide">
-                <DayBoard appts={appts} now={now} linkPatients={can('patient.read', 'patient.read.assigned')} />
+                <DayBoard appts={appts} now={now} linkable={(a) => can('patient.read') || (can('patient.read.assigned') && Boolean(a.therapistMemberId))} />
               </div>
               <div className="only-narrow">
                 {appts.map((a) => (

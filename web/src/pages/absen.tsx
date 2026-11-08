@@ -28,7 +28,11 @@ export function AbsenPage() {
   const { me, can } = useAuth();
   const tz = me?.organization?.timezone;
   const [params, setParams] = useSearchParams();
-  const [date, setDate] = useState(() => todayIn(tz));
+  // Dari tombol Absen di halaman jadwal, agenda dibuka pada tanggal jadwal itu.
+  const [date, setDate] = useState(() => {
+    const d = params.get('tanggal');
+    return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : todayIn(tz);
+  });
   const { data, error, loading, reload } = useApi<{ waiting: Row[]; done: Row[]; today: string }>(`/absen/agenda${qs({ date })}`);
   const [form, setForm] = useState<null | { row?: Row }>(null);
   const [media, setMedia] = useState<Row | null>(null);
