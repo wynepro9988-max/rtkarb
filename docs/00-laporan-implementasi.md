@@ -716,3 +716,19 @@ menekan Keluar.
 (cookie ikut diperbarui, sekali sehari); Keluar tetap menang walau perpanjangan jatuh pada permintaan
 yang sama; sesi kedaluwarsa ditolak; batas idle tetap berfungsi bila diatur. Total 243 lulus. Uji
 mutasi: tanpa perpanjangan sesi, atau tanpa pembaruan cookie, masing-masing menggagalkan test.
+
+## 31. Jam dasbor akurat dan muat ulang otomatis (8 Nov 2026)
+
+**Permintaan owner:** dasbor diperbarui otomatis agar jam akurat.
+
+- Penanda jam di papan waktu dasbor berganti tepat saat menit berganti (sebelumnya selang 60 detik
+  sejak halaman dibuka, bisa tertinggal hampir semenit) dan langsung diperbarui saat halaman
+  terlihat lagi (layar HP dinyalakan, kembali dari aplikasi/tab lain), karena browser menahan timer
+  selama halaman di belakang.
+- Dasbor dan halaman Jadwal memuat ulang datanya tiap menit selama halaman terlihat dan segera saat
+  halaman dibuka lagi (`useAutoRefresh`), tanpa layar berkedip; bila pemuatan ulang gagal sesaat,
+  data terakhir tetap tampil.
+
+**Bukti:** diperiksa di browser dengan jam simulasi: 10:00:30 → 10:01 tepat di pergantian menit;
+data dasbor dan jadwal dimuat ulang tiap 60 detik tanpa menghilangkan tampilan; setelah "layar mati"
+25 menit, jam langsung 10:27 saat halaman terlihat lagi. Tidak ada perubahan server; 243 test lulus.

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { useApi } from '../api.ts';
+import { useApi, useAutoRefresh } from '../api.ts';
 import { useAuth } from '../auth.tsx';
 import { APPT_STATUS, formatDate, formatDateShort, formatNumber, formatRupiah, formatWeekday } from '../format.ts';
 import { Badge, Empty, ErrorBox, Loading, Stat, StatStrip } from '../ui.tsx';
 
-// Menit sejak tengah malam pada zona waktu organisasi; diperbarui tiap menit.
+// Menit sejak tengah malam pada zona waktu organisasi; berganti tepat saat menit berganti, dan
+// langsung diperbarui saat halaman terlihat lagi (timer browser tertahan selama layar mati/tab di belakang).
 function useNowMinutes(timeZone = 'Asia/Jakarta') {
   const read = () => {
     const parts = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
@@ -14,8 +15,23 @@ function useNowMinutes(timeZone = 'Asia/Jakarta') {
   };
   const [now, setNow] = useState(read);
   useEffect(() => {
-    const id = setInterval(() => setNow(read()), 60_000);
-    return () => clearInterval(id);
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      clearTimeout(timer);
+      setNow(read());
+      timer = setTimeout(tick, 60_000 - (Date.now() % 60_000) + 50);
+    };
+    const onShow = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    tick();
+    document.addEventListener('visibilitychange', onShow);
+    window.addEventListener('focus', onShow);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onShow);
+      window.removeEventListener('focus', onShow);
+    };
   }, [timeZone]);
   return now;
 }
@@ -115,10 +131,11 @@ export function DashboardPage() {
   const { me, can } = useAuth();
   const tz = me?.organization?.timezone;
   const now = useNowMinutes(tz);
-  const { data, error, loading } = useApi<any>('/dashboard');
-  if (loading) return <Loading />;
-  if (error) return <ErrorBox error={error} />;
-  if (!data) return null;
+  const { data, error, loading, reload } = useApi<any>('/dashboard');
+  // Jadwal & status sesi hari ini ikut diperbarui tanpa memuat ulang halaman; data lama tetap tampil
+  // selama pemuatan ulang atau bila pemuatan ulang gagal sesaat.
+  useAutoRefresh(reload);
+  if (!data) return loading ? <Loading /> : error ? <ErrorBox error={error} /> : null;
 
   const appts: any[] = data.todayAppointments ?? [];
   const done = appts.filter((a) => a.status === 'selesai').length;

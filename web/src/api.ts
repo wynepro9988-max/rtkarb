@@ -115,6 +115,22 @@ export function useApi<T = any>(path: string | null) {
   return { data, error, loading, reload: load, setData };
 }
 
+// Muat ulang data tiap interval selama halaman terlihat, dan segera saat halaman dibuka lagi
+// (mis. layar HP dinyalakan atau kembali dari aplikasi lain).
+export function useAutoRefresh(reload: () => unknown, intervalMs = 60_000) {
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void reload();
+    };
+    const id = setInterval(refresh, intervalMs);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [reload, intervalMs]);
+}
+
 // Unduhan berkas (laporan/dokumen) lewat tautan biasa agar cookie sesi ikut terkirim.
 export function downloadUrl(path: string) {
   const a = document.createElement('a');

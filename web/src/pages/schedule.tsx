@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { get, post, qs, useApi } from '../api.ts';
+import { get, post, qs, useApi, useAutoRefresh } from '../api.ts';
 import { useAuth } from '../auth.tsx';
 import { addDays, APPT_STATUS, BILLING, formatRupiah, formatWeekday, todayIn } from '../format.ts';
 import { Badge, Dialog, Empty, ErrorBox, Field, Icon, Loading, MoneyInput, PageHeader, ReasonDialog, useSubmit, useToast } from '../ui.tsx';
@@ -19,6 +19,7 @@ export function SchedulePage() {
 
   const to = view === 'hari' ? date : addDays(date, 6);
   const { data, error, loading, reload } = useApi<any[]>(`/appointments${qs({ from: date, to, therapistId })}`);
+  useAutoRefresh(reload);
 
   const byDay = useMemo(() => {
     const groups = new Map<string, any[]>();
